@@ -70,6 +70,10 @@ export async function runRecording(
     }
 
     const total = recording.actions.length;
+    const speed =
+      recording.executionSpeed === 1.5 || recording.executionSpeed === 2
+        ? recording.executionSpeed
+        : 1;
 
     if (total === 0) {
       onProgress?.({
@@ -92,7 +96,8 @@ export async function runRecording(
         phase: "starting",
       });
 
-      const delayMs = Math.max(0, Number(action.delayMs) || 0);
+      const recordedDelayMs = Math.max(0, Number(action.delayMs) || 0);
+      const delayMs = recordedDelayMs / speed;
       if (delayMs > 0) {
         await page.waitForTimeout(delayMs);
       }

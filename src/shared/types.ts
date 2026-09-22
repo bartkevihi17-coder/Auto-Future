@@ -1,4 +1,5 @@
 export type AutomationActionType = "navigate" | "click" | "input";
+export type ExecutionSpeed = 1 | 1.5 | 2;
 
 export interface AutomationAction {
   id: string;
@@ -18,6 +19,7 @@ export interface AutomationRecording {
   createdAt: string;
   actions: AutomationAction[];
   videoPath?: string;
+  executionSpeed?: ExecutionSpeed;
 }
 
 export interface RunOptions {

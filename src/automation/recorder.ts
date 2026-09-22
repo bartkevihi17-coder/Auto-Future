@@ -78,6 +78,7 @@ export class BrowserRecorder {
       initialUrl,
       createdAt: new Date().toISOString(),
       actions: [],
+      executionSpeed: 1,
     };
 
     this.lastTimestamp = Date.now();

@@ -60,6 +60,9 @@ const inspectorSelector = document.querySelector("#inspector-selector");
 const inspectorValue = document.querySelector("#inspector-value");
 const deleteActionButton = document.querySelector("#delete-action-button");
 const saveEditorButton = document.querySelector("#save-editor-button");
+const editorSpeedGauge = document.querySelector("#editor-speed-gauge");
+const executionSpeedGauge = document.querySelector("#execution-speed-gauge");
+const executionSpeedText = document.querySelector("#execution-speed-text");
 
 const executionTitle = document.querySelector("#execution-title");
 const executionName = document.querySelector("#execution-name");
@@ -82,6 +85,7 @@ let eventCount = 0;
 let sidebarCollapsed = false;
 let currentRecording = null;
 let selectedActionId = null;
+let browserSetupNextAction = "none";
 let rubberActiveIndex = 0;
 let rubberDrag = null;
 let suppressRubberClick = false;
@@ -254,6 +258,227 @@ function actionLabel(action) {
   return action.type;
 }
 
+const SPEED_VALUES = [1, 1.5, 2];
+const speedGaugeControllers = new WeakMap();
+
+function normalizeSpeed(value) {
+  const numeric = Number(value);
+  if (numeric === 1.5) return 1.5;
+  if (numeric === 2) return 2;
+  return 1;
+}
+
+function speedLabel(speed) {
+  const normalized = normalizeSpeed(speed);
+  return normalized === 1 ? "1x" : normalized.toFixed(1) + "x";
+}
+
+function speedToLevel(speed) {
+  const normalized = normalizeSpeed(speed);
+  if (normalized === 2) return 100;
+  if (normalized === 1.5) return 50;
+  return 0;
+}
+
+function levelToSpeed(level) {
+  if (level >= 75) return 2;
+  if (level >= 25) return 1.5;
+  return 1;
+}
+
+function initSpeedGauge(root, onChange) {
+  if (!root) return null;
+
+  const liquid = root.querySelector(".slosh-gauge__liquid");
+  const marker = root.querySelector(".slosh-gauge__marker");
+  const valueNodes = [...root.querySelectorAll(".speed-gauge__value")];
+
+  const state = {
+    x: speedToLevel(root.dataset.speed),
+    target: speedToLevel(root.dataset.speed),
+    velocity: 0,
+    raf: 0,
+    last: 0,
+    dragging: false,
+  };
+
+  function paint() {
+    const rect = root.getBoundingClientRect();
+    const tiltDegrees = Math.max(-13, Math.min(13, state.velocity * 0.035));
+    const lean = (Math.tan((tiltDegrees * Math.PI) / 180) * rect.width) / 2;
+    const top = 100 - state.x;
+
+    if (liquid) {
+      liquid.style.clipPath =
+        "polygon(0 calc(" + top + "% + " + lean + "px), " +
+        "100% calc(" + top + "% - " + lean + "px), 100% 100%, 0 100%)";
+    }
+
+    if (marker) {
+      marker.style.transform =
+        "translateY(" + (((100 - state.target) * rect.height) / 100) + "px)";
+    }
+  }
+
+  function wake() {
+    if (!state.raf) {
+      state.last = performance.now();
+      state.raf = requestAnimationFrame(tick);
+    }
+  }
+
+  function tick(now) {
+    const dt = Math.min((now - state.last) / 1000, 0.05) || 1 / 120;
+    state.last = now;
+
+    const stiffness = 240;
+    const damping = 19;
+
+    state.velocity += (state.target - state.x) * stiffness * dt;
+    state.velocity *= Math.exp(-damping * dt);
+    state.x += state.velocity * dt;
+
+    if (state.x > 100) {
+      state.x = 100;
+      state.velocity *= -0.22;
+    } else if (state.x < 0) {
+      state.x = 0;
+      state.velocity *= -0.22;
+    }
+
+    paint();
+
+    if (
+      !state.dragging &&
+      Math.abs(state.target - state.x) < 0.05 &&
+      Math.abs(state.velocity) < 0.45
+    ) {
+      state.x = state.target;
+      state.velocity = 0;
+      state.raf = 0;
+      state.last = 0;
+      paint();
+      return;
+    }
+
+    state.raf = requestAnimationFrame(tick);
+  }
+
+  function setSpeed(speed, emit = false) {
+    const normalized = normalizeSpeed(speed);
+    const label = speedLabel(normalized);
+
+    root.dataset.speed = String(normalized);
+    root.setAttribute("aria-valuenow", String(normalized));
+    root.setAttribute("aria-valuetext", label);
+    valueNodes.forEach((node) => {
+      node.textContent = label;
+    });
+
+    state.target = speedToLevel(normalized);
+    wake();
+
+    if (emit) onChange?.(normalized);
+  }
+
+  function setFromPointer(event) {
+    const rect = root.getBoundingClientRect();
+    const level = Math.max(
+      0,
+      Math.min(100, ((rect.bottom - event.clientY) / rect.height) * 100)
+    );
+    setSpeed(levelToSpeed(level), true);
+  }
+
+  root.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    state.dragging = true;
+    root.dataset.held = "true";
+    root.setPointerCapture?.(event.pointerId);
+    setFromPointer(event);
+  });
+
+  root.addEventListener("pointermove", (event) => {
+    if (!state.dragging) return;
+    setFromPointer(event);
+  });
+
+  function finishPointer(event) {
+    if (!state.dragging) return;
+    state.dragging = false;
+    root.dataset.held = "false";
+    try {
+      root.releasePointerCapture?.(event.pointerId);
+    } catch {}
+    wake();
+  }
+
+  root.addEventListener("pointerup", finishPointer);
+  root.addEventListener("pointercancel", finishPointer);
+
+  root.addEventListener("keydown", (event) => {
+    const current = normalizeSpeed(root.dataset.speed);
+    let index = SPEED_VALUES.indexOf(current);
+    if (index < 0) index = 0;
+
+    if (event.key === "ArrowUp" || event.key === "ArrowRight") {
+      event.preventDefault();
+      index = Math.min(SPEED_VALUES.length - 1, index + 1);
+      setSpeed(SPEED_VALUES[index], true);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      index = Math.max(0, index - 1);
+      setSpeed(SPEED_VALUES[index], true);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setSpeed(1, true);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setSpeed(2, true);
+    }
+  });
+
+  setSpeed(root.dataset.speed || 1, false);
+  paint();
+
+  const controller = { setSpeed };
+  speedGaugeControllers.set(root, controller);
+  return controller;
+}
+
+function setCurrentExecutionSpeed(speed, source = "editor") {
+  const normalized = normalizeSpeed(speed);
+
+  if (currentRecording) {
+    currentRecording.executionSpeed = normalized;
+  }
+
+  executionSpeedText.textContent = speedLabel(normalized);
+
+  if (source !== "editor") {
+    speedGaugeControllers.get(editorSpeedGauge)?.setSpeed(normalized, false);
+  }
+
+  if (source !== "execution") {
+    speedGaugeControllers.get(executionSpeedGauge)?.setSpeed(normalized, false);
+  }
+
+  if (currentRecording) {
+    const actions = currentRecording.actions || [];
+    const times = cumulativeTimes(actions);
+    const recordedMs = times[times.length - 1] || 0;
+    executionMeta.textContent =
+      actions.length + " ações · " +
+      formatSeconds(recordedMs / normalized) +
+      " estimados em " + speedLabel(normalized);
+
+    if (source === "editor" || source === "execution") {
+      void ipcRenderer.invoke("recording:update-speed", normalized).catch(() => undefined);
+    }
+  }
+}
+
+
 function updateVideoUI() {
   const current = Number(recordingVideo.currentTime) || 0;
   const total = Number(recordingVideo.duration) || 0;
@@ -403,15 +628,19 @@ function updateSelectedAction() {
 }
 
 function loadEditor(recording) {
-  currentRecording = recording;
-  selectedActionId = recording.actions?.[0]?.id || null;
+  currentRecording = {
+    ...recording,
+    executionSpeed: normalizeSpeed(recording.executionSpeed),
+  };
+  selectedActionId = currentRecording.actions?.[0]?.id || null;
   timelineZoom = 1;
 
   editorEmpty.classList.add("is-hidden");
   editorWorkspace.classList.remove("is-hidden");
-  editorTitle.textContent = recording.name || "Gravação";
+  editorTitle.textContent = currentRecording.name || "Gravação";
 
   saveEditorButton.disabled = false;
+  setCurrentExecutionSpeed(currentRecording.executionSpeed, "load");
 
   playerProgress.value = "0";
   playerProgress.style.setProperty("--progress", "0%");
@@ -558,11 +787,15 @@ function prepareExecution(recording) {
   const actions = recording?.actions || [];
   const times = cumulativeTimes(actions);
   const totalMs = times[times.length - 1] || 0;
+  const speed = normalizeSpeed(recording?.executionSpeed);
 
   executionTitle.textContent = recording?.name || "Automação pronta";
   executionName.textContent = recording?.name || "Automação";
   executionMeta.textContent =
-    actions.length + " ações · " + formatSeconds(totalMs) + " de tempo gravado";
+    actions.length + " ações · " +
+    formatSeconds(totalMs / speed) +
+    " estimados em " + speedLabel(speed);
+  setCurrentExecutionSpeed(speed, "load");
 
   executionStartButton.disabled = actions.length === 0;
   executionDialValue = 0;
@@ -830,6 +1063,7 @@ loginForm.addEventListener("submit", async (event) => {
       setSidebarCollapsed(false);
       openPage("home", { collapse: false });
       requestAnimationFrame(measureRubber);
+      void ensureBrowserProfileOnAccess();
     }, 110);
   } finally {
     window.setTimeout(() => {
@@ -869,14 +1103,27 @@ function hideRecordingWarning() {
   recordingWarningModal.classList.add("is-hidden");
 }
 
-function showBrowserSetup(profile) {
+function showBrowserSetup(profile, nextAction = "none") {
+  browserSetupNextAction = nextAction;
   hideRecordingWarning();
   browserSetupDescription.textContent =
-    "Vamos preparar um perfil persistente no " +
+    "Não encontrei uma sessão Google válida no perfil do " +
     (profile?.browserName || "navegador") +
-    ". O login será feito em uma janela normal, sem automação.";
+    " reservado ao Auto Future. Faça o login uma vez para que as próximas gravações já abram autenticadas.";
   browserSetupModal.classList.remove("is-hidden");
   requestAnimationFrame(() => browserSetupOpen.focus());
+}
+
+async function ensureBrowserProfileOnAccess() {
+  try {
+    const profile = await ipcRenderer.invoke("browser:profile-status");
+
+    if (!profile.ready) {
+      showBrowserSetup(profile, "none");
+    }
+  } catch (error) {
+    setStatus("Sessão do navegador indisponível", "error");
+  }
 }
 
 function hideBrowserSetup() {
@@ -920,7 +1167,7 @@ async function continueFromRecordingWarning() {
     const profile = await ipcRenderer.invoke("browser:profile-status");
 
     if (!profile.ready) {
-      showBrowserSetup(profile);
+      showBrowserSetup(profile, "recording");
       return;
     }
 
@@ -962,8 +1209,16 @@ browserSetupDone.addEventListener("click", async () => {
   browserSetupDone.textContent = "Verificando...";
 
   try {
-    await ipcRenderer.invoke("browser:complete-profile-setup");
-    await startRecordingNow();
+    const profile = await ipcRenderer.invoke("browser:complete-profile-setup");
+    hideBrowserSetup();
+    setStatus("Sessão pronta · " + profile.browserName, "success");
+
+    if (browserSetupNextAction === "recording") {
+      browserSetupNextAction = "none";
+      await startRecordingNow();
+    } else {
+      browserSetupNextAction = "none";
+    }
   } catch (error) {
     setStatus("Erro", "error");
     alert(
@@ -1044,6 +1299,7 @@ saveEditorButton.addEventListener("click", async () => {
   try {
     const result = await ipcRenderer.invoke("recording:update-last", {
       actions: currentRecording.actions,
+      executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
     });
 
     currentRecording = result.recording;
@@ -1072,6 +1328,12 @@ executionStartButton.addEventListener("click", async () => {
   setStatus("Executando", "working");
 
   try {
+    const updated = await ipcRenderer.invoke("recording:update-last", {
+      actions: currentRecording.actions,
+      executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
+    });
+    currentRecording = updated.recording;
+
     await ipcRenderer.invoke("recording:run-last", {
       headless: headlessInput.checked,
     });
@@ -1139,6 +1401,14 @@ recordingVideo.addEventListener("timeupdate", updateVideoUI);
 recordingVideo.addEventListener("play", updateVideoUI);
 recordingVideo.addEventListener("pause", updateVideoUI);
 recordingVideo.addEventListener("ended", updateVideoUI);
+
+initSpeedGauge(editorSpeedGauge, (speed) => {
+  setCurrentExecutionSpeed(speed, "editor");
+});
+
+initSpeedGauge(executionSpeedGauge, (speed) => {
+  setCurrentExecutionSpeed(speed, "execution");
+});
 
 initLineSidebar();
 initMagicCards();

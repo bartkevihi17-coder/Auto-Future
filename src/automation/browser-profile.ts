@@ -6,6 +6,12 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const READY_MARKER = ".autofuture-profile-ready";
+const GOOGLE_AUTH_COOKIE_MARKERS = [
+  "__Secure-1PSID",
+  "__Secure-3PSID",
+  "SAPISID",
+  "APISID",
+];
 
 type BrowserKind = "chrome" | "edge" | "brave" | "opera";
 
@@ -223,6 +229,111 @@ async function detectBrowserSource(): Promise<BrowserSource | null> {
   return null;
 }
 
+async function profileDirectories(userDataDir: string): Promise<string[]> {
+  const candidates = ["Default"];
+
+  try {
+    const entries = await fs.readdir(userDataDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (/^Profile\s+\d+$/i.test(entry.name)) {
+        candidates.push(entry.name);
+      }
+    }
+  } catch {
+    // The managed directory may still be empty on first use.
+  }
+
+  return [...new Set(candidates)];
+}
+
+function preferencesShowGoogleAccount(raw: string): boolean {
+  try {
+    const preferences = JSON.parse(raw) as Record<string, unknown>;
+    const stack: unknown[] = [preferences];
+    let visited = 0;
+
+    while (stack.length && visited < 12000) {
+      const current = stack.pop();
+      visited += 1;
+
+      if (!current || typeof current !== "object") continue;
+
+      if (Array.isArray(current)) {
+        for (const item of current) stack.push(item);
+        continue;
+      }
+
+      const object = current as Record<string, unknown>;
+      const email = typeof object.email === "string" ? object.email : "";
+      const gaia = typeof object.gaia === "string" ? object.gaia : "";
+
+      if (email.includes("@") && gaia.length >= 6) {
+        return true;
+      }
+
+      for (const value of Object.values(object)) {
+        if (value && typeof value === "object") stack.push(value);
+      }
+    }
+  } catch {
+    // Preferences can be mid-write if the browser has not fully closed yet.
+  }
+
+  return false;
+}
+
+async function cookiesShowGoogleSession(cookiePath: string): Promise<boolean> {
+  if (!(await exists(cookiePath))) return false;
+
+  try {
+    const stat = await fs.stat(cookiePath);
+    if (stat.size < 256) return false;
+
+    const raw = await fs.readFile(cookiePath);
+    const text = raw.toString("latin1");
+
+    if (!text.toLowerCase().includes("google.com")) return false;
+
+    return GOOGLE_AUTH_COOKIE_MARKERS.some((marker) => text.includes(marker));
+  } catch {
+    return false;
+  }
+}
+
+async function hasManagedGoogleLogin(userDataDir: string): Promise<boolean> {
+  for (const profileName of await profileDirectories(userDataDir)) {
+    const profileDir = path.join(userDataDir, profileName);
+
+    try {
+      const preferences = await fs.readFile(
+        path.join(profileDir, "Preferences"),
+        "utf8"
+      );
+
+      if (preferencesShowGoogleAccount(preferences)) {
+        return true;
+      }
+    } catch {
+      // Fall through to the cookie heuristic.
+    }
+
+    const cookieCandidates = [
+      path.join(profileDir, "Network", "Cookies"),
+      path.join(profileDir, "Cookies"),
+    ];
+
+    for (const cookiePath of cookieCandidates) {
+      if (await cookiesShowGoogleSession(cookiePath)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 async function resolveManagedProfile(
   managedRootDir: string
 ): Promise<{ source: BrowserSource; userDataDir: string; ready: boolean }> {
@@ -238,10 +349,12 @@ async function resolveManagedProfile(
   const userDataDir = path.join(managedRootDir, source.kind);
   await fs.mkdir(userDataDir, { recursive: true });
 
+  const hasLogin = await hasManagedGoogleLogin(userDataDir);
+
   return {
     source,
     userDataDir,
-    ready: await exists(path.join(userDataDir, READY_MARKER)),
+    ready: hasLogin,
   };
 }
 
@@ -297,7 +410,14 @@ export async function launchBrowserProfileSetup(
 export async function markBrowserProfileReady(
   managedRootDir: string
 ): Promise<BrowserProfileStatus> {
-  const { source, userDataDir } = await resolveManagedProfile(managedRootDir);
+  const { source, userDataDir, ready } = await resolveManagedProfile(managedRootDir);
+
+  if (!ready) {
+    throw new Error(
+      "Ainda nao encontrei uma sessao Google autenticada no perfil do Auto Future. " +
+      "Entre na conta na janela de configuracao, aguarde a pagina carregar e feche o navegador antes de confirmar."
+    );
+  }
 
   await fs.writeFile(
     path.join(userDataDir, READY_MARKER),

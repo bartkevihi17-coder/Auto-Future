@@ -9,7 +9,7 @@ import {
   launchBrowserProfileSetup,
   markBrowserProfileReady,
 } from "./automation/browser-profile";
-import { AutomationAction, AutomationRecording } from "./shared/types";
+import { AutomationAction, AutomationRecording, ExecutionSpeed } from "./shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 let lastRecording: AutomationRecording | null = null;
@@ -35,9 +35,17 @@ async function persistRecording(recording: AutomationRecording): Promise<string>
   return filePath;
 }
 
+function normalizeExecutionSpeed(value: unknown): ExecutionSpeed {
+  const numeric = Number(value);
+  if (numeric === 1.5) return 1.5;
+  if (numeric === 2) return 2;
+  return 1;
+}
+
 function withVideoUrl(recording: AutomationRecording) {
   return {
     ...recording,
+    executionSpeed: normalizeExecutionSpeed(recording.executionSpeed),
     videoUrl: recording.videoPath ? pathToFileURL(recording.videoPath).href : null,
   };
 }
@@ -119,17 +127,35 @@ app.whenReady().then(async () => {
     };
   });
 
-  ipcMain.handle("recording:update-last", async (_event, payload: { actions: AutomationAction[] }) => {
+  ipcMain.handle("recording:update-last", async (_event, payload: {
+    actions: AutomationAction[];
+    executionSpeed?: ExecutionSpeed;
+  }) => {
     if (!lastRecording) {
       throw new Error("Nenhuma gravacao carregada.");
     }
 
     lastRecording.actions = payload.actions;
+    lastRecording.executionSpeed = normalizeExecutionSpeed(payload.executionSpeed);
     await persistRecording(lastRecording);
 
     return {
       ok: true,
       recording: withVideoUrl(lastRecording),
+    };
+  });
+
+  ipcMain.handle("recording:update-speed", async (_event, speed?: ExecutionSpeed) => {
+    if (!lastRecording) {
+      throw new Error("Nenhuma gravacao carregada.");
+    }
+
+    lastRecording.executionSpeed = normalizeExecutionSpeed(speed);
+    await persistRecording(lastRecording);
+
+    return {
+      ok: true,
+      executionSpeed: lastRecording.executionSpeed,
     };
   });
 

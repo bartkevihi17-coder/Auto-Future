@@ -286,6 +286,35 @@
             </div>
 
             <aside class="surface-card inspector-panel">
+              <section class="speed-section">
+                <div class="speed-section__copy">
+                  <p class="eyebrow">VELOCIDADE</p>
+                  <h3>Execução</h3>
+                  <p>Define a velocidade dos intervalos gravados.</p>
+                </div>
+
+                <div class="speed-control-wrap">
+                  <div id="editor-speed-gauge" class="slosh-gauge speed-gauge" role="slider" tabindex="0"
+                    aria-label="Velocidade da execução" aria-valuemin="1" aria-valuemax="2" aria-valuenow="1"
+                    aria-valuetext="1x" data-speed="1">
+                    <span class="slosh-gauge__value speed-gauge__value" aria-hidden="true">1x</span>
+                    <div class="slosh-gauge__liquid" aria-hidden="true">
+                      <span class="slosh-gauge__value speed-gauge__value">1x</span>
+                    </div>
+                    <div class="slosh-gauge__ticks" aria-hidden="true"></div>
+                    <div class="slosh-gauge__marker" aria-hidden="true"></div>
+                  </div>
+
+                  <div class="speed-levels" aria-hidden="true">
+                    <span>2x</span>
+                    <span>1.5x</span>
+                    <span>1x</span>
+                  </div>
+                </div>
+              </section>
+
+              <div class="inspector-divider"></div>
+
               <div class="inspector-heading">
                 <p class="eyebrow">AÇÃO</p>
                 <h3 id="inspector-type">Selecione uma ação</h3>
@@ -332,6 +361,33 @@
                 <h3 id="execution-name">Nenhuma automação preparada</h3>
                 <p id="execution-meta">Salve uma edição para preparar a execução.</p>
               </div>
+
+              <section class="execution-speed-setting">
+                <div>
+                  <p class="eyebrow">VELOCIDADE</p>
+                  <strong id="execution-speed-text">1x</strong>
+                  <span>Você pode ajustar antes de executar.</span>
+                </div>
+
+                <div class="speed-control-wrap speed-control-wrap--compact">
+                  <div id="execution-speed-gauge" class="slosh-gauge speed-gauge" role="slider" tabindex="0"
+                    aria-label="Velocidade da execução" aria-valuemin="1" aria-valuemax="2" aria-valuenow="1"
+                    aria-valuetext="1x" data-speed="1">
+                    <span class="slosh-gauge__value speed-gauge__value" aria-hidden="true">1x</span>
+                    <div class="slosh-gauge__liquid" aria-hidden="true">
+                      <span class="slosh-gauge__value speed-gauge__value">1x</span>
+                    </div>
+                    <div class="slosh-gauge__ticks" aria-hidden="true"></div>
+                    <div class="slosh-gauge__marker" aria-hidden="true"></div>
+                  </div>
+
+                  <div class="speed-levels" aria-hidden="true">
+                    <span>2x</span>
+                    <span>1.5x</span>
+                    <span>1x</span>
+                  </div>
+                </div>
+              </section>
 
               <label class="toggle-row execution-toggle">
                 <input id="headless-input" type="checkbox" />
@@ -444,8 +500,8 @@
         <div class="modal-icon">◎</div>
 
         <div class="modal-copy">
-          <p class="eyebrow">PRIMEIRA CONFIGURAÇÃO</p>
-          <h3 id="browser-setup-title">Entre na sua conta uma vez</h3>
+          <p class="eyebrow">CONTA DO NAVEGADOR</p>
+          <h3 id="browser-setup-title">Conecte a conta usada nas automações</h3>
           <p id="browser-setup-description">
             Para evitar o bloqueio do Google, o primeiro login precisa ser feito fora da automação.
           </p>
