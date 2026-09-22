@@ -1,0 +1,21 @@
+{
+  "name": "auto-future",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Record browser tasks once and replay them whenever you want.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "electron": "^38.1.2",
+    "typescript": "^5.9.2"
+  }
+}
