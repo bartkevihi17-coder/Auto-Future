@@ -148,6 +148,8 @@ const recordingsCreateFolderButton = document.querySelector("#recordings-create-
 const editorAutomationSearchForm = document.querySelector("#editor-automation-search");
 const editorAutomationSearchInput = document.querySelector("#editor-automation-search-input");
 const editorAutomationSearchClear = document.querySelector("#editor-automation-search-clear");
+const editorTagFilter = document.querySelector("#editor-tag-filter");
+const editorSortSelect = document.querySelector("#editor-sort-select");
 const editorFolderGrid = document.querySelector("#editor-folder-grid");
 const recordingsFolderGrid = document.querySelector("#recordings-folder-grid");
 const editorFolderContext = document.querySelector("#editor-folder-context");
@@ -173,6 +175,7 @@ const automationDetailsAverage = document.querySelector("#automation-details-ave
 const automationDetailsRuns = document.querySelector("#automation-details-runs");
 const automationDetailsTags = document.querySelector("#automation-details-tags");
 const automationDetailsTagInput = document.querySelector("#automation-details-tag-input");
+const automationDetailsTagColor = document.querySelector("#automation-details-tag-color");
 const automationDetailsTagAdd = document.querySelector("#automation-details-tag-add");
 const automationDetailsClose = document.querySelector("#automation-details-close");
 
@@ -195,6 +198,7 @@ let savedRecordings = [];
 let savedSchedules = [];
 let savedNotifications = [];
 let savedFolders = [];
+let savedRuns = [];
 const shownNotificationToastIds = new Set();
 let currentScheduleId = null;
 let currentVideoPageId = null;
@@ -207,6 +211,8 @@ let recordingLoaderStartedAt = 0;
 let currentDetailsRecordingId = null;
 let currentUser = null;
 let editorSearchQuery = "";
+let editorTagFilterValue = "";
+let editorSortMode = "default";
 const activeFolderBySurface = {
   editor: null,
   recordings: null,
@@ -451,7 +457,7 @@ function recordingMatchesSearch(recording, query) {
     recording.name,
     recording.initialUrl,
     folder?.name,
-    ...recordingTags(recording),
+    ...recordingTags(recording).map((tag) => tag.name),
   ]
     .map(normalizeSearchText)
     .join(" ");
@@ -1040,8 +1046,161 @@ function formatDurationMs(value) {
   return minutes + "m " + String(remaining).padStart(2, "0") + "s";
 }
 
+const FRONT_TAG_COLORS = [
+  "#7A35D8",
+  "#3478F6",
+  "#0F9D78",
+  "#E36B2C",
+  "#D94A72",
+  "#6A67CE",
+  "#B8860B",
+  "#3D8C93",
+];
+
+function defaultFrontendTagColor(name) {
+  let hash = 0;
+
+  for (const char of String(name || "")) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return FRONT_TAG_COLORS[hash % FRONT_TAG_COLORS.length];
+}
+
+function safeTagColor(value, name = "") {
+  const color = String(value || "").trim();
+
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    return color.toUpperCase();
+  }
+
+  return defaultFrontendTagColor(name);
+}
+
 function recordingTags(recording) {
-  return Array.isArray(recording?.tags) ? recording.tags.filter(Boolean) : [];
+  if (!Array.isArray(recording?.tags)) return [];
+
+  const seen = new Set();
+  const result = [];
+
+  for (const entry of recording.tags) {
+    const name =
+      entry && typeof entry === "object"
+        ? String(entry.name || "").replace(/\s+/g, " ").trim()
+        : String(entry || "").replace(/\s+/g, " ").trim();
+
+    if (!name) continue;
+
+    const key = name.toLocaleLowerCase("pt-BR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    result.push({
+      name: name.slice(0, 28),
+      color: safeTagColor(
+        entry && typeof entry === "object" ? entry.color : null,
+        name
+      ),
+    });
+
+    if (result.length >= 2) break;
+  }
+
+  return result;
+}
+
+function recordingHasTag(recording, tagName) {
+  const expected = normalizeSearchText(tagName);
+  if (!expected) return true;
+
+  return recordingTags(recording).some(
+    (tag) => normalizeSearchText(tag.name) === expected
+  );
+}
+
+function lastRunTimestamp(recordingId) {
+  let latest = 0;
+
+  for (const run of savedRuns) {
+    if (run.automationId !== recordingId) continue;
+
+    const timestamp =
+      Date.parse(run.finishedAt || "") ||
+      Date.parse(run.startedAt || "") ||
+      0;
+
+    if (timestamp > latest) latest = timestamp;
+  }
+
+  return latest;
+}
+
+function sortRecordings(recordings) {
+  const result = recordings.slice();
+
+  switch (editorSortMode) {
+    case "alpha":
+      return result.sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""), "pt-BR", {
+          sensitivity: "base",
+        })
+      );
+
+    case "created-desc":
+      return result.sort(
+        (a, b) =>
+          (Date.parse(b.createdAt || "") || 0) -
+          (Date.parse(a.createdAt || "") || 0)
+      );
+
+    case "created-asc":
+      return result.sort(
+        (a, b) =>
+          (Date.parse(a.createdAt || "") || 0) -
+          (Date.parse(b.createdAt || "") || 0)
+      );
+
+    case "last-run":
+      return result.sort(
+        (a, b) => lastRunTimestamp(b.id) - lastRunTimestamp(a.id)
+      );
+
+    default:
+      return result;
+  }
+}
+
+function refreshTagFilterOptions() {
+  const current = editorTagFilterValue;
+  const unique = new Map();
+
+  for (const recording of savedRecordings) {
+    for (const tag of recordingTags(recording)) {
+      const key = normalizeSearchText(tag.name);
+      if (!unique.has(key)) unique.set(key, tag);
+    }
+  }
+
+  const tags = [...unique.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" })
+  );
+
+  editorTagFilter.innerHTML = '<option value="">Todas as tags</option>';
+
+  for (const tag of tags) {
+    const option = document.createElement("option");
+    option.value = tag.name;
+    option.textContent = tag.name;
+    option.style.color = tag.color;
+    editorTagFilter.appendChild(option);
+  }
+
+  if (tags.some((tag) => normalizeSearchText(tag.name) === normalizeSearchText(current))) {
+    editorTagFilter.value = current;
+  } else {
+    editorTagFilterValue = "";
+    editorTagFilter.value = "";
+  }
 }
 
 async function moveRecordingToFolder(recordingId, folderId) {
@@ -1101,29 +1260,73 @@ function closeFolderCreateModal() {
 }
 
 function renderAutomationDetailsTags(tags = []) {
+  const normalizedTags = tags
+    .map((tag) =>
+      tag && typeof tag === "object"
+        ? {
+            name: String(tag.name || "").trim(),
+            color: safeTagColor(tag.color, tag.name),
+          }
+        : {
+            name: String(tag || "").trim(),
+            color: safeTagColor(null, tag),
+          }
+    )
+    .filter((tag) => tag.name)
+    .slice(0, 2);
+
   automationDetailsTags.innerHTML = "";
 
-  if (!tags.length) {
+  const full = normalizedTags.length >= 2;
+  automationDetailsTagInput.disabled = full;
+  automationDetailsTagColor.disabled = full;
+  automationDetailsTagAdd.disabled = full;
+
+  if (!normalizedTags.length) {
     automationDetailsTags.innerHTML =
       '<span class="automation-tag automation-tag--empty">Sem tags</span>';
     return;
   }
 
-  for (const tag of tags) {
+  for (const tag of normalizedTags) {
     const chip = document.createElement("span");
     chip.className = "automation-tag automation-tag--editable";
-    chip.innerHTML =
-      "<span>" + escapeHtml(tag) + "</span>" +
-      '<button type="button" aria-label="Remover tag">×</button>';
+    chip.style.setProperty("--tag-color", tag.color);
 
-    chip.querySelector("button").addEventListener("click", () => {
-      const next = tags.filter(
-        (item) =>
-          item.toLocaleLowerCase("pt-BR") !== tag.toLocaleLowerCase("pt-BR")
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.className = "automation-tag__color";
+    colorInput.value = tag.color;
+    colorInput.setAttribute("aria-label", "Alterar cor da tag " + tag.name);
+
+    const label = document.createElement("span");
+    label.textContent = tag.name;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Remover tag " + tag.name);
+    remove.textContent = "×";
+
+    colorInput.addEventListener("change", () => {
+      const next = normalizedTags.map((item) =>
+        normalizeSearchText(item.name) === normalizeSearchText(tag.name)
+          ? { ...item, color: safeTagColor(colorInput.value, item.name) }
+          : item
       );
+
       void updateCurrentDetailsTags(next);
     });
 
+    remove.addEventListener("click", () => {
+      const next = normalizedTags.filter(
+        (item) =>
+          normalizeSearchText(item.name) !== normalizeSearchText(tag.name)
+      );
+
+      void updateCurrentDetailsTags(next);
+    });
+
+    chip.append(colorInput, label, remove);
     automationDetailsTags.appendChild(chip);
   }
 }
@@ -1169,6 +1372,7 @@ async function openAutomationDetails(id) {
         : formatDurationMs(details.averageDurationMs);
     automationDetailsRuns.textContent = String(details.totalRuns || 0);
     automationDetailsTagInput.value = "";
+    automationDetailsTagColor.value = "#7A35D8";
     renderAutomationDetailsTags(details.tags || []);
 
     automationDetailsModal.classList.remove("is-hidden");
@@ -1183,6 +1387,7 @@ function closeAutomationDetails() {
   automationDetailsModal.classList.add("is-hidden");
   currentDetailsRecordingId = null;
   automationDetailsTagInput.value = "";
+  automationDetailsTagColor.value = "#7A35D8";
 }
 
 function syncProfilePopover() {
@@ -1278,19 +1483,30 @@ function renderAutomationCard(recording, surface = "editor") {
   const actions = recording.actions?.length || 0;
   const tags = recordingTags(recording);
 
+  if (tags.length) {
+    card.classList.add("has-tags");
+  }
+
   const tagHtml = tags.length
-    ? '<div class="automation-card__tags">' +
+    ? '<div class="automation-card__bookmarks">' +
       tags
-        .slice(0, 3)
-        .map((tag) => '<span class="automation-tag">' + escapeHtml(tag) + "</span>")
+        .slice(0, 2)
+        .map(
+          (tag) =>
+            '<span class="automation-bookmark" style="--tag-color:' +
+            safeTagColor(tag.color, tag.name) +
+            '" title="' +
+            escapeHtml(tag.name) +
+            '">' +
+            '<span>' + escapeHtml(tag.name) + '</span>' +
+            "</span>"
+        )
         .join("") +
-      (tags.length > 3
-        ? '<span class="automation-tag automation-tag--more">+' + (tags.length - 3) + "</span>"
-        : "") +
       "</div>"
-    : '<div class="automation-card__tags automation-card__tags--empty"><span>Sem tags</span></div>';
+    : "";
 
   card.innerHTML =
+    tagHtml +
     '<div class="automation-card__top">' +
       '<div class="automation-card__icon">✦</div>' +
       '<div class="automation-card__meta">' +
@@ -1435,16 +1651,20 @@ function renderSurfaceLibrary(surface) {
   }
 
   const searchActive = isEditor && Boolean(editorSearchQuery.trim());
+  const tagFilterActive = isEditor && Boolean(editorTagFilterValue);
+  const globalFilterActive = searchActive || tagFilterActive;
 
-  context.classList.toggle("is-hidden", !activeFolder || searchActive);
+  context.classList.toggle("is-hidden", !activeFolder || globalFilterActive);
 
   if (activeFolder) {
     contextName.textContent = activeFolder.name;
   }
 
-  const visibleRecordings = searchActive
-    ? savedRecordings.filter((recording) =>
-        recordingMatchesSearch(recording, editorSearchQuery)
+  let visibleRecordings = globalFilterActive
+    ? savedRecordings.filter(
+        (recording) =>
+          recordingMatchesSearch(recording, editorSearchQuery) &&
+          recordingHasTag(recording, editorTagFilterValue)
       )
     : savedRecordings.filter((recording) =>
         activeFolder
@@ -1452,14 +1672,18 @@ function renderSurfaceLibrary(surface) {
           : !recording.folderId
       );
 
+  if (isEditor) {
+    visibleRecordings = sortRecordings(visibleRecordings);
+  }
+
   for (const recording of visibleRecordings) {
     library.appendChild(renderAutomationCard(recording, surface));
   }
 
   const hasAnything = savedFolders.length > 0 || savedRecordings.length > 0;
-  emptyState.classList.toggle("is-hidden", hasAnything || searchActive);
+  emptyState.classList.toggle("is-hidden", hasAnything || globalFilterActive);
 
-  if (searchActive && visibleRecordings.length === 0) {
+  if (globalFilterActive && visibleRecordings.length === 0) {
     const placeholder = document.createElement("div");
     placeholder.className = "folder-empty-state search-empty-state";
     placeholder.innerHTML =
@@ -1477,11 +1701,13 @@ function renderSurfaceLibrary(surface) {
 }
 
 function renderAutomationLibraries() {
-  const editorVisibleCount = editorSearchQuery.trim()
-    ? savedRecordings.filter((recording) =>
-        recordingMatchesSearch(recording, editorSearchQuery)
-      ).length
-    : savedRecordings.length;
+  refreshTagFilterOptions();
+
+  const editorVisibleCount = savedRecordings.filter(
+    (recording) =>
+      recordingMatchesSearch(recording, editorSearchQuery) &&
+      recordingHasTag(recording, editorTagFilterValue)
+  ).length;
 
   automationLibraryCount.textContent = String(editorVisibleCount);
   renderSurfaceLibrary("editor");
@@ -1957,7 +2183,12 @@ function renderRuns(runs) {
 
 async function refreshRuns() {
   const runs = await ipcRenderer.invoke("runs:list");
-  renderRuns(runs);
+  savedRuns = Array.isArray(runs) ? runs : [];
+  renderRuns(savedRuns);
+
+  if (editorSortMode === "last-run") {
+    renderAutomationLibraries();
+  }
 }
 
 async function refreshPersistentData() {
@@ -1971,6 +2202,7 @@ async function refreshPersistentData() {
 
   savedRecordings = recordings;
   savedSchedules = schedules;
+  savedRuns = Array.isArray(runs) ? runs : [];
   savedNotifications = Array.isArray(notifications) ? notifications : [];
   savedFolders = Array.isArray(folders) ? folders : [];
 
@@ -2948,6 +3180,16 @@ editorAutomationSearchClear.addEventListener("click", () => {
   editorAutomationSearchInput.focus();
 });
 
+editorTagFilter.addEventListener("change", () => {
+  editorTagFilterValue = editorTagFilter.value;
+  renderAutomationLibraries();
+});
+
+editorSortSelect.addEventListener("change", () => {
+  editorSortMode = editorSortSelect.value || "default";
+  renderAutomationLibraries();
+});
+
 [editorCreateFolderButton, recordingsCreateFolderButton].forEach((button) => {
   button.addEventListener("click", openFolderCreateModal);
 });
@@ -3023,21 +3265,29 @@ automationDetailsTagAdd.addEventListener("click", () => {
 
   const currentTags = recordingTags(recording);
   const exists = currentTags.some(
-    (tag) => tag.toLocaleLowerCase("pt-BR") === value.toLocaleLowerCase("pt-BR")
+    (tag) => normalizeSearchText(tag.name) === normalizeSearchText(value)
   );
 
   if (exists) {
     automationDetailsTagInput.value = "";
+    setStatus("Essa tag já existe", "error");
     return;
   }
 
-  if (currentTags.length >= 8) {
-    setStatus("Limite de 8 tags atingido", "error");
+  if (currentTags.length >= 2) {
+    setStatus("Limite de 2 tags atingido", "error");
     return;
   }
 
+  const color = safeTagColor(automationDetailsTagColor.value, value);
   automationDetailsTagInput.value = "";
-  void updateCurrentDetailsTags([...currentTags, value]);
+  void updateCurrentDetailsTags([
+    ...currentTags,
+    {
+      name: value,
+      color,
+    },
+  ]);
 });
 
 automationDetailsTagInput.addEventListener("keydown", (event) => {

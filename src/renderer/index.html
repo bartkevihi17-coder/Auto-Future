@@ -183,6 +183,26 @@
               <button id="editor-automation-search-clear" class="automation-search__clear is-hidden" type="button" aria-label="Limpar busca">×</button>
             </form>
 
+            <div class="automation-list-filters">
+              <label>
+                <span>Filtrar por tag</span>
+                <select id="editor-tag-filter">
+                  <option value="">Todas as tags</option>
+                </select>
+              </label>
+
+              <label>
+                <span>Ordenar</span>
+                <select id="editor-sort-select">
+                  <option value="default">Ordem atual</option>
+                  <option value="alpha">Ordem alfabética</option>
+                  <option value="created-desc">Criação · mais novas</option>
+                  <option value="created-asc">Criação · mais antigas</option>
+                  <option value="last-run">Executada mais recentemente</option>
+                </select>
+              </label>
+            </div>
+
             <section class="folder-zone">
               <div class="folder-zone__title">
                 <span>Pastas</span>
@@ -901,11 +921,12 @@
           <div class="automation-tags-editor__head">
             <div>
               <span>Tags</span>
-              <small>Até 8 tags por automação.</small>
+              <small>Até 2 tags por automação. A cor aparece como marcador no card.</small>
             </div>
           </div>
           <div id="automation-details-tags" class="automation-tag-list"></div>
           <div class="automation-tag-add">
+            <input id="automation-details-tag-color" class="automation-tag-color" type="color" value="#7A35D8" aria-label="Cor da nova tag" />
             <input id="automation-details-tag-input" maxlength="28" placeholder="Adicionar tag" />
             <button id="automation-details-tag-add" class="button compact" type="button">Adicionar</button>
           </div>

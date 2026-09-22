@@ -31,6 +31,11 @@ export interface AutomationVideoSegment {
   title?: string;
 }
 
+export interface AutomationTag {
+  name: string;
+  color: string;
+}
+
 export interface AutomationRecording {
   id: string;
   name: string;
@@ -44,7 +49,7 @@ export interface AutomationRecording {
   optimizationEnabled?: boolean;
   notificationsEnabled?: boolean;
   folderId?: string;
-  tags?: string[];
+  tags?: AutomationTag[];
 }
 
 export interface RunOptions {

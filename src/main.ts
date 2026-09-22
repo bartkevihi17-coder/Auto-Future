@@ -18,6 +18,7 @@ import {
   AutomationRunRecord,
   AutomationRunSource,
   AutomationSchedule,
+  AutomationTag,
   ExecutionSpeed,
 } from "./shared/types";
 
@@ -74,23 +75,68 @@ function normalizeNotifications(value: unknown): boolean {
   return value === true;
 }
 
-function normalizeTags(value: unknown): string[] {
+const TAG_COLOR_PALETTE = [
+  "#7A35D8",
+  "#3478F6",
+  "#0F9D78",
+  "#E36B2C",
+  "#D94A72",
+  "#6A67CE",
+  "#B8860B",
+  "#3D8C93",
+];
+
+function defaultTagColor(name: string): string {
+  let hash = 0;
+
+  for (const char of name) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return TAG_COLOR_PALETTE[hash % TAG_COLOR_PALETTE.length];
+}
+
+function normalizeTagColor(value: unknown, name: string): string {
+  const color = String(value ?? "").trim();
+
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    return color.toUpperCase();
+  }
+
+  return defaultTagColor(name);
+}
+
+function normalizeTags(value: unknown): AutomationTag[] {
   if (!Array.isArray(value)) return [];
 
   const seen = new Set<string>();
-  const tags: string[] = [];
+  const tags: AutomationTag[] = [];
 
   for (const entry of value) {
-    const tag = String(entry ?? "").replace(/\s+/g, " ").trim();
-    if (!tag) continue;
+    const rawName =
+      entry && typeof entry === "object" && "name" in entry
+        ? (entry as { name?: unknown }).name
+        : entry;
 
-    const key = tag.toLocaleLowerCase("pt-BR");
+    const name = String(rawName ?? "").replace(/\s+/g, " ").trim().slice(0, 28);
+    if (!name) continue;
+
+    const key = name.toLocaleLowerCase("pt-BR");
     if (seen.has(key)) continue;
 
     seen.add(key);
-    tags.push(tag.slice(0, 28));
 
-    if (tags.length >= 8) break;
+    const rawColor =
+      entry && typeof entry === "object" && "color" in entry
+        ? (entry as { color?: unknown }).color
+        : undefined;
+
+    tags.push({
+      name,
+      color: normalizeTagColor(rawColor, name),
+    });
+
+    if (tags.length >= 2) break;
   }
 
   return tags;
@@ -636,7 +682,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     "recording:set-tags",
-    async (_event, payload: { id: string; tags?: string[] }) => {
+    async (_event, payload: { id: string; tags?: unknown[] }) => {
       const recording = await loadRecordingById(payload.id);
       recording.tags = normalizeTags(payload.tags);
       await persistRecording(recording);
