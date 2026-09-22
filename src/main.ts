@@ -65,6 +65,10 @@ function aiSettingsPath(): string {
   return path.join(stateDir(), "ai-settings.json");
 }
 
+function aiActionsPath(): string {
+  return path.join(stateDir(), "ai-actions.json");
+}
+
 function browserProfileDir(): string {
   return path.join(app.getPath("userData"), "browser-profile");
 }
@@ -90,6 +94,18 @@ interface StoredAiSettings {
   baseUrl: string;
   encryptedApiKey?: string;
   updatedAt?: string;
+}
+
+interface AiRegisteredAction {
+  id: string;
+  name: string;
+  instruction: string;
+  startUrl?: string;
+  domain?: string;
+  status: "ready";
+  createdAt: string;
+  model: string;
+  provider: "groq";
 }
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -137,6 +153,85 @@ async function writeAiSettings(settings: StoredAiSettings): Promise<void> {
     JSON.stringify(settings, null, 2),
     "utf8"
   );
+}
+
+async function readAiActions(): Promise<AiRegisteredAction[]> {
+  try {
+    const raw = await fs.readFile(aiActionsPath(), "utf8");
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter(
+        (item): item is AiRegisteredAction =>
+          Boolean(item) &&
+          typeof item.id === "string" &&
+          typeof item.name === "string" &&
+          typeof item.instruction === "string"
+      )
+      .slice(0, 200);
+  } catch {
+    return [];
+  }
+}
+
+async function writeAiActions(actions: AiRegisteredAction[]): Promise<void> {
+  await fs.mkdir(stateDir(), { recursive: true });
+  await fs.writeFile(
+    aiActionsPath(),
+    JSON.stringify(actions.slice(0, 200), null, 2),
+    "utf8"
+  );
+}
+
+function extractJsonObject(text: string): Record<string, unknown> {
+  const trimmed = String(text || "").trim();
+  const unfenced = trimmed
+    .replace(/^\s*\x60\x60\x60(?:json)?\s*/i, "")
+    .replace(/\s*\x60\x60\x60\s*$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(unfenced);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    const start = unfenced.indexOf("{");
+    const end = unfenced.lastIndexOf("}");
+
+    if (start < 0 || end <= start) return {};
+
+    try {
+      const parsed = JSON.parse(unfenced.slice(start, end + 1));
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+}
+
+function normalizeAiActionUrl(value: unknown): string | undefined {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) return undefined;
+
+  try {
+    const url = new URL(candidate);
+    if (!/^https?:$/.test(url.protocol)) return undefined;
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeAiActionName(value: unknown, instruction: string): string {
+  const candidate = String(value ?? "").replace(/\s+/g, " ").trim();
+
+  if (candidate) {
+    return candidate.slice(0, 64);
+  }
+
+  const fallback = instruction.replace(/\s+/g, " ").trim();
+  return (fallback || "Nova ação com IA").slice(0, 64);
 }
 
 function decryptStoredApiKey(settings: StoredAiSettings): string {
@@ -804,6 +899,91 @@ app.whenReady().then(async () => {
       usage: result.usage || null,
     };
   });
+
+  ipcMain.handle("ai:actions:list", async () => {
+    return readAiActions();
+  });
+
+  ipcMain.handle(
+    "ai:action:register",
+    async (
+      _event,
+      payload: {
+        instruction?: string;
+        effort?: string;
+      }
+    ) => {
+      const instruction = String(payload?.instruction || "").replace(/\s+/g, " ").trim();
+
+      if (!instruction) {
+        throw new Error("Descreva o que a automação precisa fazer.");
+      }
+
+      const settings = await getQwenClientSettings();
+      const effort = String(payload?.effort || "Médio").trim();
+
+      const result = await callQwen(
+        settings,
+        [
+          {
+            role: "system",
+            content:
+              "Você cadastra solicitações de automação para o Auto Future. " +
+              "Não explique como executar, não gere tutorial, pseudocódigo ou código. " +
+              "Retorne SOMENTE JSON válido com exatamente estas chaves: " +
+              "{\"name\":\"nome curto da automação\",\"startUrl\":\"URL inicial HTTPS ou string vazia\"}. " +
+              "O nome deve ter no máximo 64 caracteres. " +
+              "Use startUrl apenas quando o serviço/site inicial estiver claro na solicitação. " +
+              "Nível solicitado: " +
+              effort +
+              ".",
+          },
+          {
+            role: "user",
+            content: instruction,
+          },
+        ],
+        {
+          temperature: 0.05,
+          maxTokens: 120,
+          timeoutMs: 30_000,
+        }
+      );
+
+      const parsed = extractJsonObject(result.content);
+      const startUrl = normalizeAiActionUrl(parsed.startUrl);
+      let domain: string | undefined;
+
+      if (startUrl) {
+        try {
+          domain = new URL(startUrl).hostname;
+        } catch {
+          domain = undefined;
+        }
+      }
+
+      const action: AiRegisteredAction = {
+        id: randomUUID(),
+        name: normalizeAiActionName(parsed.name, instruction),
+        instruction,
+        startUrl,
+        domain,
+        status: "ready",
+        createdAt: new Date().toISOString(),
+        model: result.model || settings.model,
+        provider: "groq",
+      };
+
+      const actions = await readAiActions();
+      actions.unshift(action);
+      await writeAiActions(actions);
+
+      return {
+        ok: true,
+        action,
+      };
+    }
+  );
 
   ipcMain.handle(
     "ai:qwen:chat",

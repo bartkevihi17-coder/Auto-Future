@@ -239,7 +239,7 @@ let editorTagFilterValue = "";
 let editorSortMode = "default";
 let aiBusy = false;
 let aiEffort = "Médio";
-const aiMessages = [];
+let aiActiveThought = null;
 const activeFolderBySurface = {
   editor: null,
   recordings: null,
@@ -406,7 +406,7 @@ function openPage(name, options = {}) {
   } else if (name === "schedules") {
     void Promise.all([refreshRecordings(), refreshSchedules()]);
   } else if (name === "ai") {
-    void refreshAiConnectionState();
+    void Promise.all([refreshAiConnectionState(), refreshAiActions()]);
   } else if (name === "runs") {
     void refreshRuns();
   }
@@ -1605,29 +1605,236 @@ function setAiBusy(busy) {
   aiPromptInput.disabled = busy;
 }
 
-function appendAiMessage(role, content) {
-  aiEmptyState.classList.add("is-hidden");
-
-  const row = document.createElement("div");
-  row.className = "ai-message ai-message--" + role;
-
-  const bubble = document.createElement("div");
-  bubble.className = "ai-message__bubble";
-
-  if (role === "assistant") {
-    const badge = document.createElement("span");
-    badge.className = "ai-message__badge";
-    badge.textContent = "Q";
-    bubble.appendChild(badge);
+function formatThoughtElapsed(deciseconds) {
+  if (deciseconds < 600) {
+    return (deciseconds / 10).toFixed(1) + "s";
   }
 
-  const text = document.createElement("div");
-  text.className = "ai-message__text";
-  text.textContent = content;
-  bubble.appendChild(text);
-  row.appendChild(bubble);
-  aiChatThread.appendChild(row);
+  const minutes = Math.floor(deciseconds / 600);
+  const seconds = ((deciseconds % 600) / 10).toFixed(1);
+  return minutes + "m " + seconds + "s";
+}
+
+function createAiThoughtLine() {
+  aiEmptyState.classList.add("is-hidden");
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "ai-thought-wrap";
+
+  const root = document.createElement("div");
+  root.className = "thought-line";
+  root.dataset.working = "";
+  root.dataset.open = "";
+
+  const steps = [
+    "Lendo o objetivo",
+    "Identificando o ponto de partida",
+    "Preparando o cadastro",
+    "Salvando a ação no Auto Future",
+  ];
+
+  root.innerHTML =
+    '<button type="button" class="thought-line__head" data-toggle aria-expanded="true">' +
+      '<span class="thought-line__glyph" aria-hidden="true">' +
+        '<svg viewBox="0 0 24 24"><path d="M12 3.5c1.1 3.4 2.8 5.1 6.5 6.2-3.7 1.1-5.4 2.8-6.5 6.3-1.1-3.5-2.8-5.2-6.5-6.3C9.2 8.6 10.9 6.9 12 3.5Z"></path></svg>' +
+      "</span>" +
+      '<span class="thought-line__label">' +
+        '<span class="thought-line__text thought-line__text--work" data-active><span class="thought-line__breath" data-shimmer>Processando ação…</span></span>' +
+        '<span class="thought-line__text thought-line__text--done">Ação cadastrada em</span>' +
+      "</span>" +
+      '<span class="thought-line__timer">0.0s</span>' +
+      '<span class="thought-line__chevron" data-on aria-hidden="true">⌄</span>' +
+    "</button>" +
+    '<div class="thought-line__trace" data-open aria-hidden="false">' +
+      '<div class="thought-line__fold"><div class="thought-line__steps">' +
+        steps
+          .map(
+            (step, index) =>
+              '<div class="thought-line__step" data-step="' +
+              index +
+              '">' +
+                '<span class="thought-line__mark" aria-hidden="true"><i class="thought-line__pulse"></i></span>' +
+                '<span class="thought-line__step-text">' +
+                  escapeHtml(step) +
+                "</span>" +
+              "</div>"
+          )
+          .join("") +
+      "</div></div>" +
+    "</div>";
+
+  wrapper.appendChild(root);
+  aiChatThread.appendChild(wrapper);
   aiChatThread.scrollTop = aiChatThread.scrollHeight;
+
+  const timer = root.querySelector(".thought-line__timer");
+  const workText = root.querySelector(".thought-line__text--work");
+  const doneText = root.querySelector(".thought-line__text--done");
+  const head = root.querySelector(".thought-line__head");
+  const trace = root.querySelector(".thought-line__trace");
+  const stepNodes = [...root.querySelectorAll(".thought-line__step")];
+  const startedAt = performance.now();
+  let currentStep = 0;
+  let settled = false;
+
+  const paintSteps = () => {
+    stepNodes.forEach((node, index) => {
+      const done = settled || index < currentStep;
+      const active = !settled && index === currentStep;
+      node.toggleAttribute("data-done", done);
+      node.toggleAttribute("data-current", active);
+      node.querySelector(".thought-line__mark").innerHTML = done
+        ? '<span class="thought-line__tick">✓</span>'
+        : '<i class="thought-line__pulse"></i>';
+    });
+  };
+
+  paintSteps();
+
+  const timerId = window.setInterval(() => {
+    const deciseconds = Math.floor((performance.now() - startedAt) / 100);
+    timer.textContent = formatThoughtElapsed(deciseconds);
+  }, 100);
+
+  const stepId = window.setInterval(() => {
+    if (currentStep < stepNodes.length - 1) {
+      currentStep += 1;
+      paintSteps();
+    }
+  }, 850);
+
+  head.addEventListener("click", () => {
+    const open = root.hasAttribute("data-open");
+    root.toggleAttribute("data-open", !open);
+    trace.toggleAttribute("data-open", !open);
+    trace.setAttribute("aria-hidden", open ? "true" : "false");
+    head.setAttribute("aria-expanded", open ? "false" : "true");
+  });
+
+  const finish = (kind, label) => {
+    if (settled) return;
+    settled = true;
+
+    window.clearInterval(timerId);
+    window.clearInterval(stepId);
+
+    currentStep = stepNodes.length;
+    paintSteps();
+
+    root.removeAttribute("data-working");
+    root.dataset.status = kind;
+    doneText.textContent = label;
+    workText.removeAttribute("data-active");
+    doneText.setAttribute("data-active", "");
+    timer.setAttribute("data-done", "");
+
+    window.setTimeout(() => {
+      root.removeAttribute("data-open");
+      trace.removeAttribute("data-open");
+      trace.setAttribute("aria-hidden", "true");
+      head.setAttribute("aria-expanded", "false");
+    }, 360);
+  };
+
+  return {
+    element: wrapper,
+    settle() {
+      finish("done", "Ação cadastrada em");
+    },
+    fail() {
+      finish("error", "Erro após");
+    },
+    cancel() {
+      finish("cancelled", "Cancelado após");
+    },
+    remove() {
+      window.clearInterval(timerId);
+      window.clearInterval(stepId);
+      wrapper.remove();
+    },
+  };
+}
+
+function renderAiActionCard(action, prepend = true) {
+  if (!action?.id) return null;
+
+  aiEmptyState.classList.add("is-hidden");
+
+  const card = document.createElement("section");
+  card.className = "surface-card execution-summary ai-action-card";
+  card.dataset.aiActionId = action.id;
+
+  const created = new Date(action.createdAt);
+  const createdLabel = Number.isNaN(created.getTime())
+    ? "Agora"
+    : created.toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+
+  card.innerHTML =
+    '<div class="execution-summary-copy">' +
+      '<p class="eyebrow">AÇÃO CADASTRADA</p>' +
+      "<h3>" + escapeHtml(action.name || "Ação com IA") + "</h3>" +
+      '<p class="ai-action-instruction">' + escapeHtml(action.instruction || "") + "</p>" +
+    "</div>" +
+    '<div class="ai-action-meta">' +
+      '<span>Qwen · Groq</span>' +
+      (action.domain ? "<span>" + escapeHtml(action.domain) + "</span>" : "") +
+      "<span>" + escapeHtml(createdLabel) + "</span>" +
+    "</div>" +
+    '<button class="button primary execution-start ai-action-execute" type="button">▶ Executar com IA</button>';
+
+  card.querySelector(".ai-action-execute").addEventListener("click", () => {
+    openNoticeModal({
+      eyebrow: "EXECUÇÃO COM IA",
+      title: "A ação já está cadastrada",
+      description:
+        "O próximo módulo liga esta ação ao navegador ao vivo para a IA observar a página e propor cada clique.",
+      note:
+        "O cadastro já está salvo. Não é necessário pedir novamente para a Qwen explicar os passos.",
+      confirmLabel: "Entendi",
+    });
+  });
+
+  if (prepend) {
+    const firstCard = aiChatThread.querySelector(".ai-action-card");
+    const firstThought = aiChatThread.querySelector(".ai-thought-wrap");
+
+    if (firstThought) {
+      firstThought.insertAdjacentElement("afterend", card);
+    } else if (firstCard) {
+      firstCard.insertAdjacentElement("beforebegin", card);
+    } else {
+      aiChatThread.appendChild(card);
+    }
+  } else {
+    aiChatThread.appendChild(card);
+  }
+
+  return card;
+}
+
+async function refreshAiActions() {
+  let actions = [];
+
+  try {
+    const result = await ipcRenderer.invoke("ai:actions:list");
+    actions = Array.isArray(result) ? result : [];
+  } catch {
+    actions = [];
+  }
+
+  aiChatThread.querySelectorAll(".ai-action-card").forEach((card) => card.remove());
+
+  for (const action of actions.slice(0, 20)) {
+    renderAiActionCard(action, false);
+  }
+
+  aiEmptyState.classList.toggle(
+    "is-hidden",
+    actions.length > 0 || Boolean(aiChatThread.querySelector(".ai-thought-wrap"))
+  );
 }
 
 let aiRequestSerial = 0;
@@ -1643,54 +1850,72 @@ async function sendAiPrompt() {
     return;
   }
 
-  const history = aiMessages.slice(-14);
-  aiMessages.push({ role: "user", content: prompt });
-  appendAiMessage("user", prompt);
-
   aiPromptInput.value = "";
   resizeAiPrompt();
   closeAiPromptMenus();
 
   const requestId = ++aiRequestSerial;
+  const thought = createAiThoughtLine();
+  aiActiveThought = thought;
   setAiBusy(true);
 
   try {
-    const result = await ipcRenderer.invoke("ai:qwen:chat", {
-      prompt,
-      history,
-      effort: aiEffort,
-    });
+    const startedAt = performance.now();
+
+    const [result] = await Promise.all([
+      ipcRenderer.invoke("ai:action:register", {
+        instruction: prompt,
+        effort: aiEffort,
+      }),
+      new Promise((resolve) => window.setTimeout(resolve, 1100)),
+    ]);
 
     if (requestId !== aiRequestSerial) return;
 
-    const answer = String(result?.content || "").trim();
-
-    if (!answer) {
-      throw new Error("A Qwen respondeu sem conteúdo.");
+    if (!result?.action) {
+      throw new Error("A ação não foi cadastrada.");
     }
 
-    aiMessages.push({ role: "assistant", content: answer });
-    appendAiMessage("assistant", answer);
+    const remaining = Math.max(0, 1450 - (performance.now() - startedAt));
+    if (remaining > 0) {
+      await new Promise((resolve) => window.setTimeout(resolve, remaining));
+    }
+
+    thought.settle();
+
+    window.setTimeout(() => {
+      if (requestId !== aiRequestSerial) return;
+      renderAiActionCard(result.action, true);
+      aiChatThread.scrollTop = aiChatThread.scrollHeight;
+    }, 420);
+
+    setStatus("Ação cadastrada", "success");
   } catch (error) {
     if (requestId !== aiRequestSerial) return;
 
-    const message = error?.message || String(error);
-    appendAiMessage("assistant", "Erro ao chamar a Qwen: " + message);
+    thought.fail();
 
-    if (message.includes("401")) {
-      openNoticeModal({
-        eyebrow: "GROQ · AUTENTICAÇÃO",
-        title: "A chave da Groq foi recusada",
-        description:
-          "Confira se a chave foi criada em console.groq.com/keys e salve novamente em Perfil → Configurar IA.",
-        note:
-          "O Auto Future agora usa diretamente https://api.groq.com/openai/v1.",
-        confirmLabel: "Entendi",
-      });
-    }
+    const message = error?.message || String(error);
+
+    openNoticeModal({
+      eyebrow: message.includes("401") ? "GROQ · AUTENTICAÇÃO" : "I.A. · ERRO",
+      title: message.includes("401")
+        ? "A chave da Groq foi recusada"
+        : "Não foi possível cadastrar a ação",
+      description: message.includes("401")
+        ? "Confira se a chave foi criada em console.groq.com/keys e salve novamente em Perfil → Configurar IA."
+        : message,
+      note: message.includes("401")
+        ? "O Auto Future usa https://api.groq.com/openai/v1."
+        : "Nenhuma ação incompleta foi cadastrada.",
+      confirmLabel: "Entendi",
+    });
+
+    setStatus("Falha ao cadastrar ação", "error");
   } finally {
     if (requestId === aiRequestSerial) {
       setAiBusy(false);
+      aiActiveThought = null;
       aiPromptInput.focus();
     }
   }
@@ -1700,11 +1925,9 @@ function stopAiPrompt() {
   if (!aiBusy) return;
 
   aiRequestSerial += 1;
+  aiActiveThought?.cancel();
+  aiActiveThought = null;
   setAiBusy(false);
-  const interrupted =
-    "Resposta interrompida. A chamada pode terminar em segundo plano, mas será ignorada.";
-  aiMessages.push({ role: "assistant", content: interrupted });
-  appendAiMessage("assistant", interrupted);
   aiPromptInput.focus();
 }
 
