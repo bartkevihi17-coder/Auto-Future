@@ -135,6 +135,10 @@ const notificationBadge = document.querySelector("#notification-badge");
 const notificationPanel = document.querySelector("#notification-panel");
 const notificationList = document.querySelector("#notification-list");
 const notificationMarkRead = document.querySelector("#notification-mark-read");
+const swipeToastStack = document.querySelector("#swipe-toast-stack");
+
+const clickSparkCanvas = document.querySelector("#click-spark-canvas");
+const loginGradientBlinds = document.querySelector("#login-gradient-blinds");
 
 const recordingFinalizeLoader = document.querySelector("#recording-finalize-loader");
 const recordingLoaderLabel = document.querySelector("#recording-loader-label");
@@ -142,6 +146,9 @@ const recordingLoaderTimer = document.querySelector("#recording-loader-timer");
 
 const editorCreateFolderButton = document.querySelector("#editor-create-folder-button");
 const recordingsCreateFolderButton = document.querySelector("#recordings-create-folder-button");
+const editorAutomationSearchForm = document.querySelector("#editor-automation-search");
+const editorAutomationSearchInput = document.querySelector("#editor-automation-search-input");
+const editorAutomationSearchClear = document.querySelector("#editor-automation-search-clear");
 const editorFolderGrid = document.querySelector("#editor-folder-grid");
 const recordingsFolderGrid = document.querySelector("#recordings-folder-grid");
 const editorFolderContext = document.querySelector("#editor-folder-context");
@@ -189,6 +196,7 @@ let savedRecordings = [];
 let savedSchedules = [];
 let savedNotifications = [];
 let savedFolders = [];
+const shownNotificationToastIds = new Set();
 let currentScheduleId = null;
 let currentVideoPageId = null;
 let pendingVideoSeekSeconds = 0;
@@ -199,6 +207,7 @@ let recordingLoaderMaxTimerId = null;
 let recordingLoaderStartedAt = 0;
 let currentDetailsRecordingId = null;
 let currentUser = null;
+let editorSearchQuery = "";
 const activeFolderBySurface = {
   editor: null,
   recordings: null,
@@ -426,6 +435,345 @@ function formatDateTime(value) {
   });
 }
 
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
+}
+
+function recordingMatchesSearch(recording, query) {
+  const needle = normalizeSearchText(query);
+  if (!needle) return true;
+
+  const folder = savedFolders.find((item) => item.id === recording.folderId);
+  const haystack = [
+    recording.name,
+    recording.initialUrl,
+    folder?.name,
+    ...recordingTags(recording),
+  ]
+    .map(normalizeSearchText)
+    .join(" ");
+
+  return haystack.includes(needle);
+}
+
+function openNotificationPanelFromToast() {
+  closeProfilePopover();
+  notificationPanel.classList.remove("is-hidden");
+  notificationBell.setAttribute("aria-expanded", "true");
+  void refreshNotifications();
+}
+
+function createSwipeToast(notification) {
+  if (!swipeToastStack || !notification) return;
+  if (shownNotificationToastIds.has(notification.id)) return;
+
+  shownNotificationToastIds.add(notification.id);
+
+  const root = document.createElement("div");
+  root.className = "swipe-toast";
+  root.dataset.phase = "open";
+  root.dataset.mounted = "false";
+  root.dataset.status = notification.status === "error" ? "error" : "success";
+
+  const iconPath =
+    notification.status === "error"
+      ? '<path d="M12 3.5 21 19H3z"></path><path d="M12 9v4"></path><path d="M12 16.4h.01"></path>'
+      : '<circle cx="12" cy="12" r="8.5"></circle><path d="m8.5 12.3 2.2 2.2 4.8-5"></path>';
+
+  root.innerHTML =
+    '<div class="swipe-toast__gate">' +
+      '<div class="swipe-toast__lift">' +
+        '<div class="swipe-toast__card" role="status" aria-live="polite" aria-atomic="true" tabindex="0">' +
+          '<span class="swipe-toast__icon" aria-hidden="true"><svg viewBox="0 0 24 24">' +
+            iconPath +
+          "</svg></span>" +
+          '<span class="swipe-toast__body">' +
+            '<span class="swipe-toast__title">' +
+              escapeHtml(notification.title || "Ação encerrada") +
+            "</span>" +
+            '<span class="swipe-toast__desc">' +
+              escapeHtml(notification.message || "") +
+            "</span>" +
+          "</span>" +
+          '<button class="swipe-toast__action" type="button">Ver</button>' +
+          '<i class="swipe-toast__fuse" aria-hidden="true"></i>' +
+        "</div>" +
+      "</div>" +
+    "</div>";
+
+  swipeToastStack.appendChild(root);
+
+  while (swipeToastStack.children.length > 4) {
+    swipeToastStack.firstElementChild?.remove();
+  }
+
+  const card = root.querySelector(".swipe-toast__card");
+  const action = root.querySelector(".swipe-toast__action");
+  const fuse = root.querySelector(".swipe-toast__fuse");
+  const duration = 4_000;
+  const slideMs = 400;
+  let fuseAnimation = null;
+  let closing = false;
+  let drag = null;
+
+  const remove = () => {
+    root.dataset.phase = "gone";
+    window.setTimeout(() => root.remove(), 40);
+  };
+
+  const close = (reason = "timeout", instant = false) => {
+    if (closing) return;
+    closing = true;
+    root.dataset.phase = "closing";
+    root.dataset.reason = reason;
+    fuseAnimation?.pause();
+
+    if (instant) {
+      remove();
+      return;
+    }
+
+    window.setTimeout(remove, Math.round(slideMs * 0.7) + 70);
+  };
+
+  const syncFuse = () => {
+    if (!fuseAnimation) return;
+    const paused =
+      card.matches(":hover") ||
+      card.matches(":focus-within") ||
+      document.hidden ||
+      Boolean(drag);
+
+    if (paused && fuseAnimation.playState === "running") {
+      fuseAnimation.pause();
+    } else if (!paused && fuseAnimation.playState === "paused") {
+      fuseAnimation.play();
+    }
+  };
+
+  fuseAnimation = fuse.animate(
+    [{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }],
+    { duration, easing: "linear", fill: "forwards" }
+  );
+  fuseAnimation.onfinish = () => close("timeout");
+
+  card.addEventListener("pointerenter", syncFuse);
+  card.addEventListener("pointerleave", syncFuse);
+  card.addEventListener("focusin", syncFuse);
+  card.addEventListener("focusout", () => requestAnimationFrame(syncFuse));
+
+  const onVisibility = () => syncFuse();
+  document.addEventListener("visibilitychange", onVisibility, { once: false });
+
+  action.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openNotificationPanelFromToast();
+    close("action");
+  });
+
+  card.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    close("escape", true);
+  });
+
+  card.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button") || closing) return;
+
+    drag = {
+      id: event.pointerId,
+      startY: event.clientY,
+      startedAt: performance.now(),
+      currentY: 0,
+    };
+
+    card.setPointerCapture?.(event.pointerId);
+    card.dataset.swiping = "";
+    syncFuse();
+  });
+
+  card.addEventListener("pointermove", (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+
+    const raw = event.clientY - drag.startY;
+    const y = raw >= 0 ? raw : Math.max(-24, raw * 0.24);
+    drag.currentY = y;
+
+    card.style.transform = "translateY(" + y + "px)";
+    card.style.opacity = String(Math.max(0.35, 1 - Math.max(0, y) / 170));
+  });
+
+  const finishDrag = (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+
+    const state = drag;
+    drag = null;
+    delete card.dataset.swiping;
+    card.releasePointerCapture?.(event.pointerId);
+
+    const elapsed = Math.max(1, performance.now() - state.startedAt);
+    const flick = state.currentY > 18 && elapsed < 180;
+    const dismiss = state.currentY >= 40 || flick;
+
+    if (dismiss) {
+      closing = true;
+      root.dataset.phase = "closing";
+      fuseAnimation?.pause();
+
+      const animation = card.animate(
+        [
+          {
+            transform: "translateY(" + state.currentY + "px)",
+            opacity: Number(card.style.opacity || 1),
+          },
+          {
+            transform: "translateY(" + (state.currentY + card.offsetHeight + 34) + "px)",
+            opacity: 0,
+          },
+        ],
+        { duration: 240, easing: "cubic-bezier(0.23,1,0.32,1)", fill: "forwards" }
+      );
+
+      animation.onfinish = remove;
+      return;
+    }
+
+    card.animate(
+      [
+        { transform: "translateY(" + state.currentY + "px)" },
+        { transform: "translateY(0px)" },
+      ],
+      { duration: 360, easing: "cubic-bezier(0.34,1.56,0.64,1)" }
+    );
+
+    card.style.transform = "";
+    card.style.opacity = "";
+    syncFuse();
+  };
+
+  card.addEventListener("pointerup", finishDrag);
+  card.addEventListener("pointercancel", finishDrag);
+
+  requestAnimationFrame(() => {
+    root.dataset.mounted = "true";
+  });
+
+  window.setTimeout(() => {
+    document.removeEventListener("visibilitychange", onVisibility);
+  }, duration + 6_000);
+}
+
+function initClickSpark() {
+  if (!clickSparkCanvas) return;
+
+  const context = clickSparkCanvas.getContext("2d");
+  if (!context) return;
+
+  const sparks = [];
+  let frame = 0;
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+
+  const resize = () => {
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    clickSparkCanvas.width = Math.round(window.innerWidth * dpr);
+    clickSparkCanvas.height = Math.round(window.innerHeight * dpr);
+    clickSparkCanvas.style.width = window.innerWidth + "px";
+    clickSparkCanvas.style.height = window.innerHeight + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+
+  const draw = (now) => {
+    frame = 0;
+    context.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+    for (let index = sparks.length - 1; index >= 0; index -= 1) {
+      const spark = sparks[index];
+      const elapsed = now - spark.startedAt;
+
+      if (elapsed >= 400) {
+        sparks.splice(index, 1);
+        continue;
+      }
+
+      const progress = elapsed / 400;
+      const eased = progress * (2 - progress);
+      const distance = eased * 15;
+      const lineLength = 10 * (1 - eased);
+      const x1 = spark.x + distance * Math.cos(spark.angle);
+      const y1 = spark.y + distance * Math.sin(spark.angle);
+      const x2 = spark.x + (distance + lineLength) * Math.cos(spark.angle);
+      const y2 = spark.y + (distance + lineLength) * Math.sin(spark.angle);
+
+      context.strokeStyle = "rgba(55, 128, 255, " + (1 - progress) + ")";
+      context.lineWidth = 2;
+      context.lineCap = "round";
+      context.beginPath();
+      context.moveTo(x1, y1);
+      context.lineTo(x2, y2);
+      context.stroke();
+    }
+
+    if (sparks.length) {
+      frame = requestAnimationFrame(draw);
+    }
+  };
+
+  window.addEventListener("resize", resize);
+  resize();
+
+  document.addEventListener("click", (event) => {
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+
+    const startedAt = performance.now();
+
+    for (let index = 0; index < 8; index += 1) {
+      sparks.push({
+        x: event.clientX,
+        y: event.clientY,
+        angle: (Math.PI * 2 * index) / 8,
+        startedAt,
+      });
+    }
+
+    if (!frame) frame = requestAnimationFrame(draw);
+  });
+}
+
+function initLoginGradientBlinds() {
+  if (!loginGradientBlinds) return;
+
+  let targetX = 50;
+  let targetY = 50;
+  let currentX = 50;
+  let currentY = 50;
+  let frame = 0;
+
+  const update = () => {
+    currentX += (targetX - currentX) * 0.12;
+    currentY += (targetY - currentY) * 0.12;
+    loginGradientBlinds.style.setProperty("--gb-x", currentX.toFixed(2) + "%");
+    loginGradientBlinds.style.setProperty("--gb-y", currentY.toFixed(2) + "%");
+
+    const moving =
+      Math.abs(targetX - currentX) > 0.02 ||
+      Math.abs(targetY - currentY) > 0.02;
+
+    frame = moving ? requestAnimationFrame(update) : 0;
+  };
+
+  loginScreen.addEventListener("pointermove", (event) => {
+    const rect = loginScreen.getBoundingClientRect();
+    targetX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+    targetY = ((event.clientY - rect.top) / Math.max(1, rect.height)) * 100;
+
+    if (!frame) frame = requestAnimationFrame(update);
+  });
+}
+
 function automationScheduleCount(automationId) {
   return savedSchedules.filter(
     (schedule) => schedule.automationId === automationId
@@ -527,6 +875,7 @@ function renderNotifications() {
 
 async function refreshNotifications({ ringOnNew = false } = {}) {
   const previousUnread = savedNotifications.filter((item) => !item.read).length;
+  const previousIds = new Set(savedNotifications.map((item) => item.id));
   const notifications = await ipcRenderer.invoke("notifications:list");
   savedNotifications = Array.isArray(notifications) ? notifications : [];
   const unread = savedNotifications.filter((item) => !item.read).length;
@@ -535,6 +884,15 @@ async function refreshNotifications({ ringOnNew = false } = {}) {
 
   if (ringOnNew && unread > previousUnread) {
     animateNotificationBell();
+
+    const fresh = savedNotifications
+      .filter((item) => !previousIds.has(item.id))
+      .slice()
+      .reverse();
+
+    for (const notification of fresh) {
+      createSwipeToast(notification);
+    }
   }
 }
 
@@ -1108,26 +1466,39 @@ function renderSurfaceLibrary(surface) {
     activeFolder = null;
   }
 
-  context.classList.toggle("is-hidden", !activeFolder);
+  const searchActive = isEditor && Boolean(editorSearchQuery.trim());
+
+  context.classList.toggle("is-hidden", !activeFolder || searchActive);
 
   if (activeFolder) {
     contextName.textContent = activeFolder.name;
   }
 
-  const visibleRecordings = savedRecordings.filter((recording) =>
-    activeFolder
-      ? recording.folderId === activeFolder.id
-      : !recording.folderId
-  );
+  const visibleRecordings = searchActive
+    ? savedRecordings.filter((recording) =>
+        recordingMatchesSearch(recording, editorSearchQuery)
+      )
+    : savedRecordings.filter((recording) =>
+        activeFolder
+          ? recording.folderId === activeFolder.id
+          : !recording.folderId
+      );
 
   for (const recording of visibleRecordings) {
     library.appendChild(renderAutomationCard(recording, surface));
   }
 
   const hasAnything = savedFolders.length > 0 || savedRecordings.length > 0;
-  emptyState.classList.toggle("is-hidden", hasAnything);
+  emptyState.classList.toggle("is-hidden", hasAnything || searchActive);
 
-  if (activeFolder && visibleRecordings.length === 0) {
+  if (searchActive && visibleRecordings.length === 0) {
+    const placeholder = document.createElement("div");
+    placeholder.className = "folder-empty-state search-empty-state";
+    placeholder.innerHTML =
+      "<strong>Nenhuma automação encontrada</strong>" +
+      "<span>Tente outro nome, tag, domínio ou pasta.</span>";
+    library.appendChild(placeholder);
+  } else if (activeFolder && visibleRecordings.length === 0) {
     const placeholder = document.createElement("div");
     placeholder.className = "folder-empty-state";
     placeholder.innerHTML =
@@ -1138,7 +1509,13 @@ function renderSurfaceLibrary(surface) {
 }
 
 function renderAutomationLibraries() {
-  automationLibraryCount.textContent = String(savedRecordings.length);
+  const editorVisibleCount = editorSearchQuery.trim()
+    ? savedRecordings.filter((recording) =>
+        recordingMatchesSearch(recording, editorSearchQuery)
+      ).length
+    : savedRecordings.length;
+
+  automationLibraryCount.textContent = String(editorVisibleCount);
   renderSurfaceLibrary("editor");
   renderSurfaceLibrary("recordings");
 }
@@ -2577,6 +2954,32 @@ confirmModalConfirm.addEventListener("click", async () => {
   }
 });
 
+editorAutomationSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+});
+
+editorAutomationSearchInput.addEventListener("input", () => {
+  editorSearchQuery = editorAutomationSearchInput.value;
+  editorAutomationSearchForm.classList.toggle(
+    "is-active",
+    Boolean(editorSearchQuery.trim())
+  );
+  editorAutomationSearchClear.classList.toggle(
+    "is-hidden",
+    !editorSearchQuery.length
+  );
+  renderAutomationLibraries();
+});
+
+editorAutomationSearchClear.addEventListener("click", () => {
+  editorAutomationSearchInput.value = "";
+  editorSearchQuery = "";
+  editorAutomationSearchForm.classList.remove("is-active");
+  editorAutomationSearchClear.classList.add("is-hidden");
+  renderAutomationLibraries();
+  editorAutomationSearchInput.focus();
+});
+
 [editorCreateFolderButton, recordingsCreateFolderButton].forEach((button) => {
   button.addEventListener("click", openFolderCreateModal);
 });
@@ -3429,5 +3832,7 @@ initSpeedGauge(executionSpeedGauge, (speed) => {
   setCurrentExecutionSpeed(speed, "execution");
 });
 
+initClickSpark();
+initLoginGradientBlinds();
 initMagicCards();
 initRubberSegment();

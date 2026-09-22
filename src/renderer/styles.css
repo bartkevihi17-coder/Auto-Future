@@ -4371,3 +4371,464 @@ body.logged-in .background-tint {
 .notification-panel {
   z-index: 20;
 }
+
+
+/* ===== React Bits-inspired interaction layer ===== */
+
+/* Global ClickSpark: blue sparks on every pointer click. */
+.click-spark-canvas {
+  position: fixed;
+  z-index: 99999998;
+  inset: 0;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* GradientBlinds adapted to the current vanilla Electron renderer. */
+.login-gradient-blinds {
+  --gb-x: 50%;
+  --gb-y: 50%;
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.login-gradient-blinds > div {
+  position: absolute;
+  inset: -4%;
+}
+
+.login-gradient-blinds__gradient {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(62, 138, 255, 0.25) 0%,
+      rgba(70, 96, 245, 0.12) 28%,
+      rgba(93, 39, 255, 0.26) 58%,
+      rgba(85, 175, 255, 0.18) 100%
+    );
+  background-size: 170% 100%;
+  mix-blend-mode: screen;
+  opacity: 0.92;
+  animation: login-gradient-drift 12s ease-in-out infinite alternate;
+}
+
+.login-gradient-blinds__stripes {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255,255,255,0.20) 0 2.5%,
+      rgba(31, 42, 86, 0.13) 2.5% 5%,
+      rgba(255,255,255,0.04) 5% 7.5%,
+      rgba(19, 31, 78, 0.18) 7.5% 10%
+    );
+  mix-blend-mode: overlay;
+  opacity: 0.72;
+  transform: skewX(-2deg) scale(1.04);
+}
+
+.login-gradient-blinds__spotlight {
+  background:
+    radial-gradient(
+      circle at var(--gb-x) var(--gb-y),
+      rgba(255,255,255,0.68) 0,
+      rgba(98, 161, 255,0.36) 14%,
+      rgba(87, 77, 255,0.13) 31%,
+      transparent 54%
+    );
+  mix-blend-mode: screen;
+  opacity: 0.86;
+}
+
+.login-gradient-blinds__noise {
+  opacity: 0.16;
+  mix-blend-mode: soft-light;
+  background-image:
+    repeating-radial-gradient(
+      circle at 23% 18%,
+      rgba(255,255,255,0.55) 0 0.7px,
+      rgba(24,32,70,0.22) 0.7px 1.4px,
+      transparent 1.4px 3px
+    );
+  background-size: 5px 5px;
+}
+
+.login-card {
+  position: relative;
+  z-index: 2;
+}
+
+.login-card .login-copy h1 {
+  margin-top: 0;
+}
+
+@keyframes login-gradient-drift {
+  from {
+    background-position: 0% 50%;
+    transform: translate3d(-1.5%, 0, 0) scale(1.04);
+  }
+
+  to {
+    background-position: 100% 50%;
+    transform: translate3d(1.5%, 0, 0) scale(1.04);
+  }
+}
+
+/* CurvedInput-inspired search bar for the editor library. */
+.curved-search {
+  position: relative;
+  display: block;
+  width: min(640px, 100%);
+  height: 66px;
+  margin: 2px 0 10px;
+  outline: none;
+}
+
+.curved-search__shape {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 66px;
+  overflow: visible;
+  filter: drop-shadow(0 9px 18px rgba(11, 14, 42, 0.09));
+  pointer-events: none;
+}
+
+.curved-search__surface {
+  fill: rgba(255,255,255,0.97);
+  stroke: #333c73;
+  stroke-width: 1.35;
+  vector-effect: non-scaling-stroke;
+}
+
+.curved-search__ring {
+  fill: none;
+  stroke: #4c7dff;
+  stroke-width: 7;
+  opacity: 0;
+  vector-effect: non-scaling-stroke;
+  transition: opacity 180ms ease;
+}
+
+.curved-search:focus-within .curved-search__ring,
+.curved-search.is-active .curved-search__ring {
+  opacity: 0.19;
+}
+
+.curved-search__icon {
+  position: absolute;
+  z-index: 2;
+  top: 24px;
+  left: 27px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: #4a67d8;
+  pointer-events: none;
+}
+
+.curved-search__icon svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.curved-search input {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  right: 45px;
+  left: 55px;
+  height: 31px;
+  border: 0;
+  padding: 0 2px;
+  color: #222a58;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 31px;
+  outline: none;
+}
+
+.curved-search input::placeholder {
+  color: #989fb8;
+  font-weight: 520;
+}
+
+.curved-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.curved-search__clear {
+  position: absolute;
+  z-index: 3;
+  top: 21px;
+  right: 25px;
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  color: #6f7393;
+  background: rgba(77, 100, 203, 0.08);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.curved-search__clear:hover {
+  color: #3c55bd;
+  background: rgba(77, 100, 203, 0.14);
+}
+
+.curved-search__clear:active {
+  transform: scale(0.94);
+}
+
+.search-empty-state {
+  min-height: 108px;
+}
+
+/* SwipeToast adapted to the current vanilla renderer and notification center. */
+.swipe-toast-stack {
+  position: fixed;
+  z-index: 99999999;
+  right: 24px;
+  bottom: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  width: min(356px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.swipe-toast {
+  --st-bg: #27272a;
+  --st-ink: #f5f5f5;
+  --st-fuse: #4e8cff;
+  --st-radius: 12px;
+  --st-slide: 400ms;
+  display: grid;
+  grid-template-rows: 1fr;
+  width: min(356px, 100%);
+  color: var(--st-ink);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: auto;
+  transition: grid-template-rows var(--st-slide) cubic-bezier(0.23,1,0.32,1);
+}
+
+.swipe-toast__gate {
+  min-height: 0;
+}
+
+.swipe-toast__lift {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    transform var(--st-slide) cubic-bezier(0.23,1,0.32,1),
+    opacity calc(var(--st-slide) * 0.6) ease;
+}
+
+.swipe-toast[data-mounted="false"] .swipe-toast__lift {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+.swipe-toast[data-phase="closing"] {
+  grid-template-rows: 0fr;
+  transition-duration: 280ms;
+}
+
+.swipe-toast[data-phase="closing"] .swipe-toast__lift {
+  opacity: 0;
+  transform: translateY(100%);
+  transition:
+    transform 280ms cubic-bezier(0.23,1,0.32,1),
+    opacity 200ms ease;
+}
+
+.swipe-toast[data-phase="gone"] {
+  grid-template-rows: 0fr;
+}
+
+.swipe-toast__card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 64px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--st-radius);
+  overflow: hidden;
+  color: var(--st-ink);
+  background: var(--st-bg);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,0.08),
+    0 10px 28px rgba(22,18,28,0.22);
+  cursor: grab;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    box-shadow 160ms ease,
+    border-color 160ms ease;
+}
+
+.swipe-toast__card:focus-visible {
+  border-color: rgba(109, 156, 255, 0.66);
+  box-shadow:
+    0 0 0 3px rgba(65, 128, 255, 0.16),
+    0 10px 28px rgba(22,18,28,0.22);
+}
+
+.swipe-toast__card[data-swiping] {
+  cursor: grabbing;
+}
+
+.swipe-toast__icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: #b7ffd7;
+  background: rgba(57, 196, 124, 0.13);
+}
+
+.swipe-toast[data-status="error"] .swipe-toast__icon {
+  color: #ffc0ca;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.swipe-toast__icon svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.swipe-toast__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.swipe-toast__title {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swipe-toast__desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(245,245,245,0.64);
+  font-size: 9px;
+  font-weight: 450;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.swipe-toast__action {
+  flex: none;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 9px;
+  color: #27272a;
+  background: #f5f5f5;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 760;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    opacity 150ms ease;
+}
+
+.swipe-toast__action:hover {
+  opacity: 0.9;
+}
+
+.swipe-toast__action:active {
+  transform: scale(0.96);
+}
+
+.swipe-toast__fuse {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(78,140,255,0.22) 10%,
+      rgba(78,140,255,0.58) 24%,
+      #4e8cff 42%,
+      #4e8cff 62%,
+      rgba(78,140,255,0.58) 80%,
+      transparent 100%
+    );
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .swipe-toast-stack {
+    right: 16px;
+    bottom: 62px;
+    width: calc(100vw - 32px);
+  }
+
+  .curved-search {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-gradient-blinds__gradient {
+    animation: none;
+  }
+
+  .swipe-toast__lift {
+    transform: none !important;
+    transition: opacity 180ms ease;
+  }
+}
