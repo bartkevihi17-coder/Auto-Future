@@ -128,6 +128,21 @@ const executionDialLit = document.querySelector("#execution-dial-lit");
 const executionDialHead = document.querySelector("#execution-dial-head");
 const executionCometPaths = [...document.querySelectorAll("#execution-dial-comet path")];
 
+const editorSpeedSection = document.querySelector("#editor-speed-section");
+const executionSpeedSection = document.querySelector("#execution-speed-section");
+const editorNotificationToggle = document.querySelector("#editor-notification-toggle");
+
+const notificationBell = document.querySelector("#notification-bell");
+const notificationBellGlyph = document.querySelector("#notification-bell-glyph");
+const notificationBadge = document.querySelector("#notification-badge");
+const notificationPanel = document.querySelector("#notification-panel");
+const notificationList = document.querySelector("#notification-list");
+const notificationMarkRead = document.querySelector("#notification-mark-read");
+
+const recordingFinalizeLoader = document.querySelector("#recording-finalize-loader");
+const recordingLoaderLabel = document.querySelector("#recording-loader-label");
+const recordingLoaderTimer = document.querySelector("#recording-loader-timer");
+
 const rubberTrack = document.querySelector(".rubber-segment");
 const rubberThumb = document.querySelector(".rubber-segment__thumb");
 const rubberItems = [...document.querySelectorAll(".rubber-segment__item")];
@@ -140,11 +155,14 @@ let selectedActionId = null;
 let browserSetupNextAction = "none";
 let savedRecordings = [];
 let savedSchedules = [];
+let savedNotifications = [];
 let currentScheduleId = null;
 let currentVideoPageId = null;
 let pendingVideoSeekSeconds = 0;
 let pendingConfirmAction = null;
 let pendingOptimizationEnabled = null;
+let recordingLoaderTimerId = null;
+let recordingLoaderStartedAt = 0;
 let rubberActiveIndex = 0;
 let rubberDrag = null;
 let suppressRubberClick = false;
@@ -404,19 +422,242 @@ function automationScheduleCount(automationId) {
   ).length;
 }
 
+function renderBellToggleState(button, enabled) {
+  if (!button) return;
+
+  const on = enabled === true;
+  button.dataset.on = on ? "true" : "false";
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+
+  const offFace = button.querySelector(".bell-toggle__face--off");
+  const onFace = button.querySelector(".bell-toggle__face--on");
+
+  if (offFace) offFace.textContent = "Notificar";
+  if (onFace) onFace.textContent = "Você será notificado";
+}
+
+async function setAutomationNotifications(recording, button, enabled) {
+  button.disabled = true;
+
+  try {
+    const result = await ipcRenderer.invoke("recording:set-notifications", {
+      id: recording.id,
+      enabled,
+    });
+
+    recording.notificationsEnabled = result.recording.notificationsEnabled;
+
+    if (currentRecording?.id === recording.id) {
+      currentRecording.notificationsEnabled = result.recording.notificationsEnabled;
+      renderBellToggleState(
+        editorNotificationToggle,
+        currentRecording.notificationsEnabled
+      );
+    }
+
+    renderBellToggleState(button, recording.notificationsEnabled);
+    await refreshRecordings();
+
+    setStatus(
+      recording.notificationsEnabled
+        ? "Notificações ativadas"
+        : "Notificações desativadas",
+      "success"
+    );
+  } catch (error) {
+    renderBellToggleState(button, recording.notificationsEnabled);
+    setStatus("Erro ao alterar notificações", "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function animateNotificationBell() {
+  if (!notificationBellGlyph) return;
+  notificationBellGlyph.classList.remove("is-ringing");
+  void notificationBellGlyph.offsetWidth;
+  notificationBellGlyph.classList.add("is-ringing");
+}
+
+function renderNotifications() {
+  const unread = savedNotifications.filter((item) => !item.read).length;
+
+  notificationBadge.textContent = unread > 9 ? "9+" : String(unread);
+  notificationBadge.classList.toggle("is-hidden", unread === 0);
+
+  notificationList.innerHTML = "";
+
+  if (!savedNotifications.length) {
+    notificationList.innerHTML = '<p class="empty">Nenhuma notificação.</p>';
+    return;
+  }
+
+  for (const item of savedNotifications) {
+    const row = document.createElement("article");
+    row.className =
+      "notification-item" +
+      (item.read ? "" : " is-unread") +
+      (item.status === "error" ? " is-error" : "");
+
+    row.innerHTML =
+      '<span class="notification-item__dot"></span>' +
+      '<div class="notification-item__copy">' +
+        "<strong>" + escapeHtml(item.title || "Automação concluída") + "</strong>" +
+        "<p>" + escapeHtml(item.message || "") + "</p>" +
+        "<small>" +
+          (item.source === "schedule" ? "Agendada" : "Manual") +
+          " · " +
+          escapeHtml(formatDateTime(item.createdAt)) +
+        "</small>" +
+      "</div>";
+
+    notificationList.appendChild(row);
+  }
+}
+
+async function refreshNotifications({ ringOnNew = false } = {}) {
+  const previousUnread = savedNotifications.filter((item) => !item.read).length;
+  const notifications = await ipcRenderer.invoke("notifications:list");
+  savedNotifications = Array.isArray(notifications) ? notifications : [];
+  const unread = savedNotifications.filter((item) => !item.read).length;
+
+  renderNotifications();
+
+  if (ringOnNew && unread > previousUnread) {
+    animateNotificationBell();
+  }
+}
+
+function setFinalizeLoader(status, label) {
+  const loader = recordingFinalizeLoader.querySelector(".lattice-loader");
+  loader.dataset.status = status;
+  recordingLoaderLabel.textContent = label;
+
+  if (status === "working") {
+    recordingLoaderStartedAt = performance.now();
+    recordingLoaderTimer.textContent = "0.0s";
+
+    if (recordingLoaderTimerId) clearInterval(recordingLoaderTimerId);
+
+    recordingLoaderTimerId = window.setInterval(() => {
+      const elapsed = (performance.now() - recordingLoaderStartedAt) / 1000;
+      recordingLoaderTimer.textContent = elapsed.toFixed(1) + "s";
+    }, 100);
+  } else if (recordingLoaderTimerId) {
+    clearInterval(recordingLoaderTimerId);
+    recordingLoaderTimerId = null;
+  }
+}
+
+function showFinalizeLoader() {
+  setFinalizeLoader("working", "Finalizando gravação");
+  recordingFinalizeLoader.classList.remove("is-hidden");
+}
+
+async function finishFinalizeLoader(status, label, delay = 650) {
+  setFinalizeLoader(status, label);
+  await new Promise((resolve) => setTimeout(resolve, delay));
+  recordingFinalizeLoader.classList.add("is-hidden");
+}
+
+function setupFuseDelete(root, onFuseEnd) {
+  const idle = root.querySelector(".fuse-button__idle");
+  const undo = root.querySelector(".fuse-button__undo");
+  const rim = root.querySelector(".fuse-button__rim rect");
+  let animation = null;
+  let phase = "idle";
+  let canHoverPause = false;
+
+  const reset = () => {
+    animation?.cancel();
+    animation = null;
+    phase = "idle";
+    canHoverPause = false;
+    root.dataset.phase = "idle";
+  };
+
+  const arm = () => {
+    if (phase !== "idle") return;
+
+    phase = "armed";
+    root.dataset.phase = "armed";
+    canHoverPause = false;
+
+    animation = rim.animate(
+      [{ strokeDashoffset: 0 }, { strokeDashoffset: -1 }],
+      {
+        duration: 4000,
+        easing: "linear",
+        fill: "forwards",
+      }
+    );
+
+    animation.onfinish = async () => {
+      phase = "settled";
+      root.dataset.phase = "settled";
+
+      try {
+        await onFuseEnd();
+      } catch (error) {
+        setStatus("Erro ao excluir", "error");
+        reset();
+      }
+    };
+
+    requestAnimationFrame(() => undo.focus({ preventScroll: true }));
+  };
+
+  const cancel = () => {
+    if (phase !== "armed") return;
+    reset();
+    requestAnimationFrame(() => idle.focus({ preventScroll: true }));
+    setStatus("Exclusão cancelada", "idle");
+  };
+
+  idle.addEventListener("click", arm);
+  undo.addEventListener("click", cancel);
+
+  root.addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "mouse") return;
+    canHoverPause = true;
+    if (animation?.playState === "paused") animation.play();
+  });
+
+  root.addEventListener("pointerenter", (event) => {
+    if (
+      event.pointerType === "mouse" &&
+      canHoverPause &&
+      phase === "armed" &&
+      animation?.playState === "running"
+    ) {
+      animation.pause();
+    }
+  });
+
+  root.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && phase === "armed") {
+      event.preventDefault();
+      cancel();
+    }
+  });
+}
+
 function renderAutomationCard(recording) {
   const card = document.createElement("article");
   card.className = "automation-card surface-card";
 
   const scheduleTotal = automationScheduleCount(recording.id);
-  const speed = speedLabel(recording.executionSpeed);
+  const modeLabel =
+    recording.optimizationEnabled !== false
+      ? "Otimizada"
+      : speedLabel(recording.executionSpeed);
   const actions = recording.actions?.length || 0;
 
   card.innerHTML =
     '<div class="automation-card__top">' +
       '<div class="automation-card__icon">✦</div>' +
       '<div class="automation-card__meta">' +
-        "<span>" + escapeHtml(speed) + "</span>" +
+        "<span>" + escapeHtml(modeLabel) + "</span>" +
         "<span>" + actions + " ações</span>" +
       "</div>" +
     "</div>" +
@@ -432,10 +673,26 @@ function renderAutomationCard(recording) {
       "</span>" +
       "<span>" + escapeHtml(formatDateTime(recording.updatedAt || recording.createdAt)) + "</span>" +
     "</div>" +
+    '<button class="bell-toggle automation-card__notify" type="button" aria-pressed="false">' +
+      '<span class="bell-toggle__bell" aria-hidden="true">' +
+        '<span class="bell-toggle__glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5V10a6 6 0 0 1 12 0v6.5l1.6 2.3H4.4L6 16.5z"></path><path d="M12 2.5V4"></path></svg></span>' +
+        '<span class="bell-toggle__wave bell-toggle__wave--left"></span>' +
+        '<span class="bell-toggle__wave bell-toggle__wave--right"></span>' +
+      "</span>" +
+      '<span class="bell-toggle__say">' +
+        '<span class="bell-toggle__face bell-toggle__face--off">Notificar</span>' +
+        '<span class="bell-toggle__face bell-toggle__face--on">Você será notificado</span>' +
+      "</span>" +
+    "</button>" +
     '<div class="automation-card__actions">' +
       '<button class="button compact automation-edit-button" type="button">Editar</button>' +
       '<button class="button compact automation-schedule-button" type="button">Agendar</button>' +
-      '<button class="button compact danger automation-delete-button" type="button">Excluir</button>' +
+      '<span class="fuse-button automation-delete-fuse" data-phase="idle">' +
+        '<button class="fuse-button__face fuse-button__idle" type="button"><span class="fuse-button__icon">⌫</span>Excluir</button>' +
+        '<button class="fuse-button__face fuse-button__undo" type="button"><span class="fuse-button__icon">↶</span>Desfazer</button>' +
+        '<span class="fuse-button__face fuse-button__settled"><span class="fuse-button__icon">✓</span>Excluída</span>' +
+        '<svg class="fuse-button__rim" aria-hidden="true"><rect pathLength="1"></rect></svg>' +
+      "</span>" +
     "</div>";
 
   card
@@ -451,43 +708,40 @@ function renderAutomationCard(recording) {
       });
     });
 
-  card
-    .querySelector(".automation-delete-button")
-    .addEventListener("click", () => {
-      openConfirmModal({
-        eyebrow: "EXCLUIR AUTOMAÇÃO",
-        title: 'Excluir "' + (recording.name || "Automação") + '"?',
-        description:
-          "Essa automação será removida da sua biblioteca e não poderá mais ser executada.",
-        note:
-          scheduleTotal > 0
-            ? scheduleTotal + " agendamento" + (scheduleTotal === 1 ? "" : "s") +
-              " vinculado" + (scheduleTotal === 1 ? "" : "s") +
-              " também " + (scheduleTotal === 1 ? "será removido." : "serão removidos.")
-            : "Os arquivos de gravação ligados a essa automação também serão removidos.",
-        confirmLabel: "Excluir automação",
-        onConfirm: async () => {
-          setStatus("Excluindo automação", "working");
-          await ipcRenderer.invoke("recording:delete", recording.id);
+  const notifyButton = card.querySelector(".automation-card__notify");
+  renderBellToggleState(notifyButton, recording.notificationsEnabled === true);
 
-          if (currentRecording?.id === recording.id) {
-            currentRecording = null;
-            selectedActionId = null;
-          }
+  notifyButton.addEventListener("click", () => {
+    void setAutomationNotifications(
+      recording,
+      notifyButton,
+      recording.notificationsEnabled !== true
+    );
+  });
 
-          await Promise.all([refreshRecordings(), refreshSchedules()]);
+  setupFuseDelete(
+    card.querySelector(".automation-delete-fuse"),
+    async () => {
+      setStatus("Excluindo automação", "working");
+      await ipcRenderer.invoke("recording:delete", recording.id);
 
-          const activePage =
-            document.querySelector("[data-page-view].active")?.dataset.pageView;
+      if (currentRecording?.id === recording.id) {
+        currentRecording = null;
+        selectedActionId = null;
+      }
 
-          if (activePage === "editor") {
-            showEditorLibrary();
-          }
+      await Promise.all([refreshRecordings(), refreshSchedules()]);
 
-          setStatus("Automação excluída", "success");
-        },
-      });
-    });
+      const activePage =
+        document.querySelector("[data-page-view].active")?.dataset.pageView;
+
+      if (activePage === "editor") {
+        showEditorLibrary();
+      }
+
+      setStatus("Automação excluída", "success");
+    }
+  );
 
   return card;
 }
@@ -956,7 +1210,15 @@ function renderRuns(runs) {
         "</span>" +
       "</div>" +
       '<div class="run-card__time">' +
-        "<strong>" + escapeHtml(run.status) + "</strong>" +
+        "<strong>" +
+          escapeHtml(
+            run.status === "success"
+              ? "Concluída"
+              : run.status === "error"
+                ? "Erro"
+                : "Executando"
+          ) +
+        "</strong>" +
         "<span>" + escapeHtml(formatDateTime(run.startedAt)) + "</span>" +
       "</div>";
 
@@ -974,20 +1236,23 @@ async function refreshRuns() {
 }
 
 async function refreshPersistentData() {
-  const [recordings, schedules, runs] = await Promise.all([
+  const [recordings, schedules, runs, notifications] = await Promise.all([
     ipcRenderer.invoke("recordings:list"),
     ipcRenderer.invoke("schedules:list"),
     ipcRenderer.invoke("runs:list"),
+    ipcRenderer.invoke("notifications:list"),
   ]);
 
   savedRecordings = recordings;
   savedSchedules = schedules;
+  savedNotifications = Array.isArray(notifications) ? notifications : [];
 
   renderAutomationLibraries();
   populateScheduleAutomationSelect();
   renderScheduleMap();
   renderScheduleList();
   renderRuns(runs);
+  renderNotifications();
 }
 
 function videoSegmentForPage(pageId) {
@@ -1310,6 +1575,9 @@ function refreshExecutionMeta() {
 function renderOptimizationState() {
   const enabled = currentRecording?.optimizationEnabled !== false;
 
+  editorSpeedSection?.classList.toggle("is-collapsed", enabled);
+  executionSpeedSection?.classList.toggle("is-collapsed", enabled);
+
   [editorOptimizationButton, executionOptimizationButton].forEach((button) => {
     if (!button) return;
 
@@ -1609,6 +1877,7 @@ function loadEditor(recording) {
     ...recording,
     executionSpeed: normalizeSpeed(recording.executionSpeed),
     optimizationEnabled: recording.optimizationEnabled !== false,
+    notificationsEnabled: recording.notificationsEnabled === true,
   };
   selectedActionId = currentRecording.actions?.[0]?.id || null;
   timelineZoom = 1;
@@ -1622,6 +1891,10 @@ function loadEditor(recording) {
   saveEditorButton.disabled = false;
   setCurrentExecutionSpeed(currentRecording.executionSpeed, "load");
   renderOptimizationState();
+  renderBellToggleState(
+    editorNotificationToggle,
+    currentRecording.notificationsEnabled
+  );
 
   const editorSchedules = savedSchedules.filter(
     (schedule) => schedule.automationId === currentRecording.id
@@ -1770,12 +2043,17 @@ function prepareExecution(recording) {
     ...recording,
     executionSpeed: speed,
     optimizationEnabled: recording?.optimizationEnabled !== false,
+    notificationsEnabled: recording?.notificationsEnabled === true,
   };
 
   executionTitle.textContent = currentRecording?.name || "Automação pronta";
   executionName.textContent = currentRecording?.name || "Automação";
   setCurrentExecutionSpeed(speed, "load");
   renderOptimizationState();
+  renderBellToggleState(
+    editorNotificationToggle,
+    currentRecording.notificationsEnabled
+  );
   refreshExecutionMeta();
 
   executionStartButton.disabled = actions.length === 0;
@@ -2309,8 +2587,10 @@ document.addEventListener("keydown", (event) => {
 });
 
 stopButton.addEventListener("click", async () => {
+  showFinalizeLoader();
+
   try {
-    setStatus("Salvando", "working");
+    setStatus("Finalizando gravação", "working");
 
     const result = await ipcRenderer.invoke("recording:stop");
 
@@ -2320,11 +2600,14 @@ stopButton.addEventListener("click", async () => {
     setStatus("Salva · " + result.recording.actions.length + " ações", "success");
 
     await refreshRecordings();
+    await finishFinalizeLoader("done", "Gravação pronta");
+
     currentRecording = null;
     selectedActionId = null;
     openPage("editor");
   } catch (error) {
     setStatus("Erro", "error");
+    await finishFinalizeLoader("error", "Erro ao finalizar", 950);
     alert(error?.message || String(error));
   }
 });
@@ -2355,6 +2638,7 @@ saveEditorButton.addEventListener("click", async () => {
       actions: currentRecording.actions,
       executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
       optimizationEnabled: currentRecording.optimizationEnabled !== false,
+      notificationsEnabled: currentRecording.notificationsEnabled === true,
     });
 
     currentRecording = result.recording;
@@ -2388,6 +2672,7 @@ executionStartButton.addEventListener("click", async () => {
       actions: currentRecording.actions,
       executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
       optimizationEnabled: currentRecording.optimizationEnabled !== false,
+      notificationsEnabled: currentRecording.notificationsEnabled === true,
     });
     currentRecording = updated.recording;
 
@@ -2611,6 +2896,10 @@ ipcRenderer.on("runs:changed", () => {
   void refreshRuns();
 });
 
+ipcRenderer.on("notifications:changed", () => {
+  void refreshNotifications({ ringOnNew: true });
+});
+
 ipcRenderer.on("schedule:execution-error", (_event, payload) => {
   setStatus("Agendamento falhou", "error");
 
@@ -2679,6 +2968,49 @@ recordingVideo.addEventListener("timeupdate", updateVideoUI);
 recordingVideo.addEventListener("play", updateVideoUI);
 recordingVideo.addEventListener("pause", updateVideoUI);
 recordingVideo.addEventListener("ended", updateVideoUI);
+
+notificationBell.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const willOpen = notificationPanel.classList.contains("is-hidden");
+  notificationPanel.classList.toggle("is-hidden", !willOpen);
+  notificationBell.setAttribute("aria-expanded", willOpen ? "true" : "false");
+
+  if (willOpen) {
+    void refreshNotifications();
+  }
+});
+
+notificationPanel.addEventListener("click", (event) => {
+  event.stopPropagation();
+});
+
+document.addEventListener("click", () => {
+  if (!notificationPanel.classList.contains("is-hidden")) {
+    notificationPanel.classList.add("is-hidden");
+    notificationBell.setAttribute("aria-expanded", "false");
+  }
+});
+
+notificationMarkRead.addEventListener("click", async () => {
+  notificationMarkRead.disabled = true;
+
+  try {
+    await ipcRenderer.invoke("notifications:mark-all-read");
+    await refreshNotifications();
+  } finally {
+    notificationMarkRead.disabled = false;
+  }
+});
+
+editorNotificationToggle.addEventListener("click", () => {
+  if (!currentRecording) return;
+
+  void setAutomationNotifications(
+    currentRecording,
+    editorNotificationToggle,
+    currentRecording.notificationsEnabled !== true
+  );
+});
 
 editorOptimizationButton.addEventListener("click", openOptimizationModal);
 executionOptimizationButton.addEventListener("click", openOptimizationModal);

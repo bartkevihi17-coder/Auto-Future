@@ -103,6 +103,7 @@ export class BrowserRecorder {
       actions: [],
       executionSpeed: 1,
       optimizationEnabled: true,
+      notificationsEnabled: false,
     };
 
     this.lastTimestamp = Date.now();

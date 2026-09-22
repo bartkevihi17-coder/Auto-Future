@@ -42,6 +42,7 @@ export interface AutomationRecording {
   videoSegments?: AutomationVideoSegment[];
   executionSpeed?: ExecutionSpeed;
   optimizationEnabled?: boolean;
+  notificationsEnabled?: boolean;
 }
 
 export interface RunOptions {
@@ -82,4 +83,17 @@ export interface AutomationRunRecord {
   finishedAt?: string;
   status: AutomationRunStatus;
   error?: string;
+}
+
+export interface AutomationNotificationRecord {
+  id: string;
+  automationId: string;
+  automationName: string;
+  scheduleId?: string;
+  source: AutomationRunSource;
+  status: "success" | "error";
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
 }

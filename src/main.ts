@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, Notification } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -12,6 +12,7 @@ import {
 } from "./automation/browser-profile";
 import {
   AutomationAction,
+  AutomationNotificationRecord,
   AutomationRecording,
   AutomationRunRecord,
   AutomationRunSource,
@@ -45,6 +46,10 @@ function runsPath(): string {
   return path.join(stateDir(), "runs.json");
 }
 
+function notificationsPath(): string {
+  return path.join(stateDir(), "notifications.json");
+}
+
 function browserProfileDir(): string {
   return path.join(app.getPath("userData"), "browser-profile");
 }
@@ -58,6 +63,10 @@ function normalizeExecutionSpeed(value: unknown): ExecutionSpeed {
 
 function normalizeOptimization(value: unknown): boolean {
   return value !== false;
+}
+
+function normalizeNotifications(value: unknown): boolean {
+  return value === true;
 }
 
 function localDateKey(date: Date): string {
@@ -80,6 +89,7 @@ function withVideoUrl(recording: AutomationRecording) {
     ...recording,
     executionSpeed: normalizeExecutionSpeed(recording.executionSpeed),
     optimizationEnabled: normalizeOptimization(recording.optimizationEnabled),
+    notificationsEnabled: normalizeNotifications(recording.notificationsEnabled),
     videoUrl: recording.videoPath
       ? pathToFileURL(recording.videoPath).href
       : null,
@@ -99,6 +109,7 @@ async function persistRecording(recording: AutomationRecording): Promise<string>
   recording.updatedAt = new Date().toISOString();
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
   recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
+  recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
 
   const filePath = path.join(dir, recording.id + ".json");
   await fs.writeFile(filePath, JSON.stringify(recording, null, 2), "utf8");
@@ -111,6 +122,7 @@ async function loadRecordingById(id: string): Promise<AutomationRecording> {
   const recording = JSON.parse(raw) as AutomationRecording;
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
   recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
+  recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
   return recording;
 }
 
@@ -128,6 +140,7 @@ async function listRecordings(): Promise<AutomationRecording[]> {
       const recording = JSON.parse(raw) as AutomationRecording;
       recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
       recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
+      recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
       recordings.push(recording);
     } catch {
       // Keep loading the rest of the persistent library if one file is damaged.
@@ -177,6 +190,89 @@ async function writeRuns(runs: AutomationRunRecord[]): Promise<void> {
     JSON.stringify(runs.slice(0, 300), null, 2),
     "utf8"
   );
+}
+
+async function readNotifications(): Promise<AutomationNotificationRecord[]> {
+  try {
+    const raw = await fs.readFile(notificationsPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as AutomationNotificationRecord[] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeNotifications(
+  notifications: AutomationNotificationRecord[]
+): Promise<void> {
+  await fs.mkdir(stateDir(), { recursive: true });
+  await fs.writeFile(
+    notificationsPath(),
+    JSON.stringify(notifications.slice(0, 200), null, 2),
+    "utf8"
+  );
+}
+
+async function appendNotification(
+  notification: AutomationNotificationRecord
+): Promise<void> {
+  const notifications = await readNotifications();
+  notifications.unshift(notification);
+  await writeNotifications(notifications);
+  mainWindow?.webContents.send("notifications:changed");
+
+  if (Notification.isSupported()) {
+    const systemNotification = new Notification({
+      title: notification.title,
+      body: notification.message,
+      silent: false,
+    });
+
+    systemNotification.on("click", () => {
+      mainWindow?.show();
+      mainWindow?.focus();
+    });
+
+    systemNotification.show();
+  }
+}
+
+async function notifyRunFinished(
+  recording: AutomationRecording,
+  source: AutomationRunSource,
+  status: "success" | "error",
+  scheduleId?: string,
+  errorMessage?: string
+): Promise<void> {
+  if (!normalizeNotifications(recording.notificationsEnabled)) return;
+
+  const scheduled = source === "schedule";
+  const success = status === "success";
+  const title = success
+    ? scheduled
+      ? "Ação agendada encerrada"
+      : "Ação encerrada"
+    : scheduled
+      ? "Ação agendada encerrada com erro"
+      : "Ação encerrada com erro";
+
+  const message = success
+    ? '"' + recording.name + '" encerrou a execução com sucesso.'
+    : '"' + recording.name + '" foi encerrada com erro' +
+      (errorMessage ? ": " + errorMessage : ".");
+
+  await appendNotification({
+    id: randomUUID(),
+    automationId: recording.id,
+    automationName: recording.name,
+    scheduleId,
+    source,
+    status,
+    title,
+    message,
+    createdAt: new Date().toISOString(),
+    read: false,
+  });
 }
 
 function scheduleSlotKeys(schedule: AutomationSchedule): string[] {
@@ -264,11 +360,24 @@ async function executeRecording(
     run.status = "success";
     run.finishedAt = new Date().toISOString();
     await appendRun(run);
+    await notifyRunFinished(
+      recording,
+      source,
+      "success",
+      scheduleId
+    ).catch(() => undefined);
   } catch (error) {
     run.status = "error";
     run.finishedAt = new Date().toISOString();
     run.error = error instanceof Error ? error.message : String(error);
     await appendRun(run);
+    await notifyRunFinished(
+      recording,
+      source,
+      "error",
+      scheduleId,
+      run.error
+    ).catch(() => undefined);
     throw error;
   }
 }
@@ -361,6 +470,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  app.setAppUserModelId("com.autofuture.desktop");
+
   await fs.mkdir(videosDir(), { recursive: true });
   await fs.mkdir(stateDir(), { recursive: true });
 
@@ -506,6 +617,7 @@ app.whenReady().then(async () => {
         actions: AutomationAction[];
         executionSpeed?: ExecutionSpeed;
         optimizationEnabled?: boolean;
+        notificationsEnabled?: boolean;
       }
     ) => {
       if (!lastRecording) {
@@ -518,6 +630,9 @@ app.whenReady().then(async () => {
       );
       lastRecording.optimizationEnabled = normalizeOptimization(
         payload.optimizationEnabled ?? lastRecording.optimizationEnabled
+      );
+      lastRecording.notificationsEnabled = normalizeNotifications(
+        payload.notificationsEnabled ?? lastRecording.notificationsEnabled
       );
 
       await persistRecording(lastRecording);
@@ -544,6 +659,44 @@ app.whenReady().then(async () => {
       return {
         ok: true,
         optimizationEnabled: lastRecording.optimizationEnabled,
+      };
+    }
+  );
+
+  ipcMain.handle(
+    "recording:update-notifications",
+    async (_event, enabled?: boolean) => {
+      if (!lastRecording) {
+        throw new Error("Nenhuma gravacao carregada.");
+      }
+
+      lastRecording.notificationsEnabled = normalizeNotifications(enabled);
+      await persistRecording(lastRecording);
+      mainWindow?.webContents.send("recordings:changed");
+
+      return {
+        ok: true,
+        notificationsEnabled: lastRecording.notificationsEnabled,
+      };
+    }
+  );
+
+  ipcMain.handle(
+    "recording:set-notifications",
+    async (_event, payload: { id: string; enabled?: boolean }) => {
+      const recording = await loadRecordingById(payload.id);
+      recording.notificationsEnabled = normalizeNotifications(payload.enabled);
+      await persistRecording(recording);
+
+      if (lastRecording?.id === recording.id) {
+        lastRecording = recording;
+      }
+
+      mainWindow?.webContents.send("recordings:changed");
+
+      return {
+        ok: true,
+        recording: withVideoUrl(recording),
       };
     }
   );
@@ -591,6 +744,28 @@ app.whenReady().then(async () => {
       return { ok: true };
     }
   );
+
+  ipcMain.handle("notifications:list", async () => {
+    return readNotifications();
+  });
+
+  ipcMain.handle("notifications:mark-all-read", async () => {
+    const notifications = await readNotifications();
+    const next = notifications.map((notification) => ({
+      ...notification,
+      read: true,
+    }));
+
+    await writeNotifications(next);
+    mainWindow?.webContents.send("notifications:changed");
+    return { ok: true };
+  });
+
+  ipcMain.handle("notifications:clear", async () => {
+    await writeNotifications([]);
+    mainWindow?.webContents.send("notifications:changed");
+    return { ok: true };
+  });
 
   ipcMain.handle("schedules:list", async () => {
     return readSchedules();

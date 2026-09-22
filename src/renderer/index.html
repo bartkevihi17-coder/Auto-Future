@@ -300,7 +300,7 @@
             </div>
 
             <aside class="surface-card inspector-panel">
-              <section class="speed-section">
+              <section id="editor-speed-section" class="speed-section">
                 <div class="speed-section__copy">
                   <p class="eyebrow">VELOCIDADE</p>
                   <h3>Execução</h3>
@@ -334,6 +334,18 @@
                   <small>Esperar o alvo ficar pronto em vez de usar delay.</small>
                 </span>
                 <span class="optimization-toggle__state">Ativada</span>
+              </button>
+
+              <button id="editor-notification-toggle" class="bell-toggle automation-notification-toggle" type="button" aria-pressed="false">
+                <span class="bell-toggle__bell" aria-hidden="true">
+                  <span class="bell-toggle__glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5V10a6 6 0 0 1 12 0v6.5l1.6 2.3H4.4L6 16.5z"></path><path d="M12 2.5V4"></path></svg></span>
+                  <span class="bell-toggle__wave bell-toggle__wave--left"></span>
+                  <span class="bell-toggle__wave bell-toggle__wave--right"></span>
+                </span>
+                <span class="bell-toggle__say">
+                  <span class="bell-toggle__face bell-toggle__face--off">Notificar</span>
+                  <span class="bell-toggle__face bell-toggle__face--on">Você será notificado</span>
+                </span>
               </button>
 
               <section class="editor-schedule-summary">
@@ -394,7 +406,7 @@
                 <p id="execution-meta">Salve uma edição para preparar a execução.</p>
               </div>
 
-              <section class="execution-speed-setting">
+              <section id="execution-speed-section" class="execution-speed-setting">
                 <div>
                   <p class="eyebrow">VELOCIDADE</p>
                   <strong id="execution-speed-text">1x</strong>
@@ -552,6 +564,26 @@
           <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="editor">Editor</button>
           <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="schedules">Agenda</button>
           <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="runs">Histórico</button>
+        </div>
+
+        <div class="notification-dock-wrap">
+          <button id="notification-bell" class="notification-bell" type="button" aria-label="Notificações" aria-expanded="false">
+            <span id="notification-bell-glyph" class="notification-bell__glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5V10a6 6 0 0 1 12 0v6.5l1.6 2.3H4.4L6 16.5z"></path><path d="M12 2.5V4"></path></svg></span>
+            <span id="notification-badge" class="notification-bell__badge is-hidden">0</span>
+          </button>
+
+          <div id="notification-panel" class="notification-panel is-hidden">
+            <div class="notification-panel__head">
+              <div>
+                <p class="eyebrow">NOTIFICAÇÕES</p>
+                <strong>Atividades concluídas</strong>
+              </div>
+              <button id="notification-mark-read" class="button compact" type="button">Marcar lidas</button>
+            </div>
+            <div id="notification-list" class="notification-list">
+              <p class="empty">Nenhuma notificação.</p>
+            </div>
+          </div>
         </div>
       </nav>
     </div>
@@ -770,6 +802,33 @@
         <div class="modal-actions">
           <button id="optimization-modal-cancel" class="button" type="button">Cancelar</button>
           <button id="optimization-modal-confirm" class="button primary" type="button">Entendi</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="recording-finalize-loader" class="recording-finalize-loader is-hidden" role="status" aria-live="polite">
+      <div class="recording-finalize-loader__card">
+        <div class="lattice-loader" data-status="working" data-shape="round">
+          <span class="lattice-loader__grid" aria-hidden="true">
+            <span class="lattice-loader__layer lattice-loader__run">
+              <span class="lattice-loader__cell" style="animation-delay:0ms"></span>
+              <span class="lattice-loader__cell" style="animation-delay:108ms"></span>
+              <span class="lattice-loader__cell" style="animation-delay:216ms"></span>
+              <span class="lattice-loader__cell" style="animation-delay:756ms"></span>
+              <span class="lattice-loader__cell" data-hole></span>
+              <span class="lattice-loader__cell" style="animation-delay:324ms"></span>
+              <span class="lattice-loader__cell" style="animation-delay:648ms"></span>
+              <span class="lattice-loader__cell" style="animation-delay:540ms"></span>
+              <span class="lattice-loader__cell" style="animation-delay:432ms"></span>
+            </span>
+            <span class="lattice-loader__layer lattice-loader__mark">
+              <span class="lattice-loader__cell"></span><span class="lattice-loader__cell"></span><span class="lattice-loader__cell"></span>
+              <span class="lattice-loader__cell"></span><span class="lattice-loader__cell"></span><span class="lattice-loader__cell"></span>
+              <span class="lattice-loader__cell"></span><span class="lattice-loader__cell"></span><span class="lattice-loader__cell"></span>
+            </span>
+          </span>
+          <span id="recording-loader-label" class="lattice-loader__label">Finalizando gravação</span>
+          <span id="recording-loader-timer" class="lattice-loader__timer">0.0s</span>
         </div>
       </div>
     </div>
