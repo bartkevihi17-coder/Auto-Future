@@ -115,6 +115,12 @@ export class BrowserRecorder {
         value?: string;
         url?: string;
         isSecret?: boolean;
+        key?: string;
+        code?: string;
+        ctrlKey?: boolean;
+        altKey?: boolean;
+        shiftKey?: boolean;
+        metaKey?: boolean;
         x?: number;
         y?: number;
       };
@@ -138,7 +144,11 @@ export class BrowserRecorder {
         return;
       }
 
-      if (data.type !== "click" && data.type !== "input") return;
+      if (
+        data.type !== "click" &&
+        data.type !== "input" &&
+        data.type !== "key"
+      ) return;
 
       this.recordAction({
         type: data.type,
@@ -146,6 +156,12 @@ export class BrowserRecorder {
         value: data.value,
         url: sourceUrl,
         isSecret: Boolean(data.isSecret),
+        key: data.key,
+        code: data.code,
+        ctrlKey: Boolean(data.ctrlKey),
+        altKey: Boolean(data.altKey),
+        shiftKey: Boolean(data.shiftKey),
+        metaKey: Boolean(data.metaKey),
         frameUrl: source.frame.url(),
         frameName: source.frame.name() || undefined,
         x: Number.isFinite(data.x) ? Number(data.x) : undefined,
@@ -303,6 +319,30 @@ export class BrowserRecorder {
     window.setTimeout(reportNavigationIfChanged, 400);
   }, true);
 
+  window.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (["Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
+
+    const target = eventTarget(event);
+    const isPassword =
+      target instanceof HTMLInputElement &&
+      target.type === "password";
+
+    if (isPassword) return;
+
+    send({
+      type: "key",
+      selector: target ? selectorFor(target) : "",
+      key: event.key,
+      code: event.code,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      ...pointFor(target)
+    });
+  }, true);
+
   const inputTimers = new WeakMap();
 
   const reportInput = (target) => {
@@ -388,8 +428,6 @@ export class BrowserRecorder {
       url: page.url(),
     }));
 
-    await this.context?.close().catch(() => undefined);
-
     const segments = [];
 
     for (const entry of pageVideos) {
@@ -400,10 +438,25 @@ export class BrowserRecorder {
         finished.id + "-" + entry.meta.pageId + ".webm"
       );
 
-      const saved = await entry.video
+      if (!entry.page.isClosed()) {
+        await entry.page.close({ runBeforeUnload: false }).catch(() => undefined);
+      }
+
+      let saved = await entry.video
         .saveAs(finalPath)
         .then(() => true)
         .catch(() => false);
+
+      if (!saved) {
+        const rawPath = await entry.video.path().catch(() => null);
+
+        if (rawPath) {
+          saved = await fs
+            .copyFile(rawPath, finalPath)
+            .then(() => true)
+            .catch(() => false);
+        }
+      }
 
       if (!saved) continue;
 
@@ -414,6 +467,8 @@ export class BrowserRecorder {
         url: entry.url,
       });
     }
+
+    await this.context?.close().catch(() => undefined);
 
     finished.videoSegments = segments;
 
@@ -676,7 +731,7 @@ export class BrowserRecorder {
       Partial<
         Pick<
           AutomationAction,
-          "selector" | "value" | "isSecret" | "frameUrl" | "frameName" | "pageId" | "x" | "y"
+          "selector" | "value" | "isSecret" | "key" | "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "frameUrl" | "frameName" | "pageId" | "x" | "y"
         >
       >
   ): void {
@@ -712,6 +767,12 @@ export class BrowserRecorder {
       selector: partial.selector,
       value: partial.value,
       isSecret: partial.isSecret,
+      key: partial.key,
+      code: partial.code,
+      ctrlKey: partial.ctrlKey,
+      altKey: partial.altKey,
+      shiftKey: partial.shiftKey,
+      metaKey: partial.metaKey,
       frameUrl: partial.frameUrl,
       frameName: partial.frameName,
       pageId: partial.pageId,

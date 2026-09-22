@@ -93,6 +93,53 @@ async function clickAction(page: Page, action: AutomationAction): Promise<void> 
   throw new Error("Nao foi possivel localizar o ponto do clique gravado.");
 }
 
+async function keyAction(page: Page, action: AutomationAction): Promise<void> {
+  const frame = resolveActionFrame(page, action);
+
+  if (action.selector) {
+    try {
+      const locator = frame.locator(action.selector).first();
+      await locator.waitFor({ state: "attached", timeout: 4_000 });
+      await locator.focus();
+    } catch {
+      const point = await actionPoint(page, frame, action);
+      if (point) {
+        await page.mouse.click(point.x, point.y);
+      }
+    }
+  } else {
+    const point = await actionPoint(page, frame, action);
+    if (point) {
+      await page.mouse.click(point.x, point.y);
+    }
+  }
+
+  const key = action.key || action.code;
+  if (!key) return;
+
+  const hasCommandModifier =
+    Boolean(action.ctrlKey) ||
+    Boolean(action.altKey) ||
+    Boolean(action.metaKey);
+
+  if (key.length === 1 && !hasCommandModifier) {
+    await page.keyboard.insertText(key);
+    return;
+  }
+
+  const parts: string[] = [];
+
+  if (action.ctrlKey) parts.push("Control");
+  if (action.altKey) parts.push("Alt");
+  if (action.shiftKey) parts.push("Shift");
+  if (action.metaKey) parts.push("Meta");
+
+  const normalizedKey = key === " " ? "Space" : key;
+  parts.push(normalizedKey);
+
+  await page.keyboard.press(parts.join("+"));
+}
+
 async function inputAction(page: Page, action: AutomationAction): Promise<void> {
   const frame = resolveActionFrame(page, action);
   let selectorError: unknown = null;
@@ -354,6 +401,11 @@ export async function runRecording(
           }
 
           await inputAction(actionPage, action);
+          break;
+        }
+
+        case "key": {
+          await keyAction(actionPage, action);
           break;
         }
       }

@@ -362,6 +362,7 @@ function formatClock(seconds) {
 function actionLabel(action) {
   if (action.type === "click") return "Clique";
   if (action.type === "input") return "Digitação";
+  if (action.type === "key") return "Tecla";
   if (action.type === "navigate") return "Navegação";
   return action.type;
 }
@@ -1414,7 +1415,7 @@ function renderTimeline() {
     const left = Math.min(96, Math.max(0, (times[index] / timelineActionDurationMs) * 100));
     button.style.left = left + "%";
 
-    const icon = action.type === "click" ? "●" : action.type === "input" ? "⌨" : "↗";
+    const icon = action.type === "click" ? "●" : (action.type === "input" || action.type === "key") ? "⌨" : "↗";
     button.innerHTML =
       "<strong>" + icon + " " + actionLabel(action) + "</strong>" +
       "<small>" + formatSeconds(times[index]) + "</small>";
@@ -1469,8 +1470,14 @@ function selectAction(actionId) {
   inspectorSelector.value =
     action.type === "navigate" ? action.url || "" : action.selector || "";
 
-  inspectorValue.disabled = action.type !== "input" || action.isSecret;
-  inspectorValue.value = action.isSecret ? "" : action.value || "";
+  inspectorValue.disabled =
+    (action.type !== "input" && action.type !== "key") || action.isSecret;
+
+  inspectorValue.value = action.isSecret
+    ? ""
+    : action.type === "key"
+      ? action.key || ""
+      : action.value || "";
 
   deleteActionButton.disabled = false;
   setEditorVideoPage(action.pageId);
@@ -1493,6 +1500,10 @@ function updateSelectedAction() {
 
   if (action.type === "input" && !action.isSecret) {
     action.value = inspectorValue.value;
+  }
+
+  if (action.type === "key" && !action.isSecret) {
+    action.key = inspectorValue.value;
   }
 
   renderTimeline();
@@ -1681,6 +1692,7 @@ function prepareExecution(recording) {
 function executionActionLabel(type) {
   if (type === "click") return "clique";
   if (type === "input") return "digitação";
+  if (type === "key") return "tecla";
   if (type === "navigate") return "navegação";
   return "ação";
 }

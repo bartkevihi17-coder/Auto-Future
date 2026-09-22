@@ -1,4 +1,4 @@
-export type AutomationActionType = "navigate" | "click" | "input";
+export type AutomationActionType = "navigate" | "click" | "input" | "key";
 export type ExecutionSpeed = 1 | 1.5 | 2;
 
 export interface AutomationAction {
@@ -10,6 +10,12 @@ export interface AutomationAction {
   selector?: string;
   value?: string;
   isSecret?: boolean;
+  key?: string;
+  code?: string;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  metaKey?: boolean;
   frameUrl?: string;
   frameName?: string;
   pageId?: string;
