@@ -581,6 +581,56 @@
               </div>
             </div>
 
+            <div id="ai-agent-workspace" class="ai-agent-workspace is-hidden">
+              <div class="ai-agent-head">
+                <button id="ai-agent-close" class="button compact" type="button">← Voltar</button>
+                <div class="ai-agent-title">
+                  <p class="eyebrow">EXECUÇÃO COM IA</p>
+                  <strong id="ai-agent-name">Ação com IA</strong>
+                  <span id="ai-agent-objective"></span>
+                </div>
+                <div id="ai-agent-status" class="ai-agent-status">Preparando navegador...</div>
+              </div>
+
+              <div class="ai-browser-shell">
+                <div class="ai-browser-toolbar">
+                  <button id="ai-browser-back" type="button" aria-label="Voltar">←</button>
+                  <button id="ai-browser-forward" type="button" aria-label="Avançar">→</button>
+                  <button id="ai-browser-reload" type="button" aria-label="Recarregar">↻</button>
+                  <div id="ai-browser-url" class="ai-browser-url">about:blank</div>
+                </div>
+
+                <webview
+                  id="ai-agent-browser"
+                  class="ai-agent-browser"
+                  src="about:blank"
+                  partition="persist:auto-future-ai"
+                  allowpopups
+                ></webview>
+              </div>
+
+              <div id="ai-agent-proposal" class="ai-agent-proposal is-hidden">
+                <div>
+                  <p class="eyebrow">PRÓXIMA AÇÃO</p>
+                  <strong id="ai-agent-proposal-label">Aguardando...</strong>
+                  <span id="ai-agent-proposal-detail"></span>
+                </div>
+                <div class="ai-agent-actions">
+                  <button id="ai-agent-manual" class="button" type="button">Manual</button>
+                  <button id="ai-agent-reject" class="button" type="button">Recusar</button>
+                  <button id="ai-agent-approve" class="button primary" type="button">Aprovar</button>
+                </div>
+              </div>
+
+              <div id="ai-agent-manual-bar" class="ai-agent-manual-bar is-hidden">
+                <div>
+                  <strong>Controle manual ativo</strong>
+                  <span>Clique, digite ou navegue livremente. Quando terminar, devolva o controle para a IA.</span>
+                </div>
+                <button id="ai-agent-manual-done" class="button primary" type="button">Continuar com IA</button>
+              </div>
+            </div>
+
             <div class="ai-prompt-wrap">
               <div id="ai-prompt-bar" class="prompt-bar" data-busy="false">
                 <div id="ai-model-menu" class="prompt-bar__menu ai-prompt-menu is-hidden" data-kind="model">

@@ -200,6 +200,24 @@ const aiChatThread = document.querySelector("#ai-chat-thread");
 const aiEmptyState = document.querySelector("#ai-empty-state");
 const aiConnectionLabel = document.querySelector("#ai-connection-label");
 const aiPromptBar = document.querySelector("#ai-prompt-bar");
+const aiAgentWorkspace = document.querySelector("#ai-agent-workspace");
+const aiAgentClose = document.querySelector("#ai-agent-close");
+const aiAgentName = document.querySelector("#ai-agent-name");
+const aiAgentObjective = document.querySelector("#ai-agent-objective");
+const aiAgentStatus = document.querySelector("#ai-agent-status");
+const aiAgentBrowser = document.querySelector("#ai-agent-browser");
+const aiBrowserBack = document.querySelector("#ai-browser-back");
+const aiBrowserForward = document.querySelector("#ai-browser-forward");
+const aiBrowserReload = document.querySelector("#ai-browser-reload");
+const aiBrowserUrl = document.querySelector("#ai-browser-url");
+const aiAgentProposal = document.querySelector("#ai-agent-proposal");
+const aiAgentProposalLabel = document.querySelector("#ai-agent-proposal-label");
+const aiAgentProposalDetail = document.querySelector("#ai-agent-proposal-detail");
+const aiAgentApprove = document.querySelector("#ai-agent-approve");
+const aiAgentReject = document.querySelector("#ai-agent-reject");
+const aiAgentManual = document.querySelector("#ai-agent-manual");
+const aiAgentManualBar = document.querySelector("#ai-agent-manual-bar");
+const aiAgentManualDone = document.querySelector("#ai-agent-manual-done");
 const aiPromptInput = document.querySelector("#ai-prompt-input");
 const aiSendButton = document.querySelector("#ai-send-button");
 const aiPlusButton = document.querySelector("#ai-plus-button");
@@ -240,6 +258,12 @@ let editorSortMode = "default";
 let aiBusy = false;
 let aiEffort = "Médio";
 let aiActiveThought = null;
+let aiAgentAction = null;
+let aiAgentProposalState = null;
+let aiAgentRejected = [];
+let aiAgentRunning = false;
+let aiAgentManualMode = false;
+let aiAgentRequestSerial = 0;
 const activeFolderBySurface = {
   editor: null,
   recordings: null,
@@ -1755,6 +1779,574 @@ function createAiThoughtLine() {
   };
 }
 
+function setAiAgentStatus(text, kind = "") {
+  aiAgentStatus.textContent = text;
+  aiAgentStatus.className = "ai-agent-status" + (kind ? " " + kind : "");
+}
+
+function waitAi(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function waitForAiBrowserLoad(timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      aiAgentBrowser.removeEventListener("did-stop-loading", finish);
+      resolve();
+    };
+
+    const timer = window.setTimeout(finish, timeoutMs);
+    aiAgentBrowser.addEventListener("did-stop-loading", finish, { once: true });
+  });
+}
+
+async function clearAiTargetBubble() {
+  if (!aiAgentBrowser || typeof aiAgentBrowser.executeJavaScript !== "function") {
+    return;
+  }
+
+  await aiAgentBrowser
+    .executeJavaScript(
+      `(() => {
+        document.getElementById("__af_ai_bubble")?.remove();
+        document.querySelectorAll("[data-af-ai-highlight]").forEach((el) => {
+          el.style.outline = el.dataset.afAiPrevOutline || "";
+          el.style.outlineOffset = el.dataset.afAiPrevOutlineOffset || "";
+          delete el.dataset.afAiHighlight;
+          delete el.dataset.afAiPrevOutline;
+          delete el.dataset.afAiPrevOutlineOffset;
+        });
+      })()`
+    )
+    .catch(() => undefined);
+}
+
+async function snapshotAiBrowser() {
+  if (!aiAgentBrowser || typeof aiAgentBrowser.executeJavaScript !== "function") {
+    throw new Error("O navegador interno ainda não está pronto.");
+  }
+
+  return aiAgentBrowser.executeJavaScript(
+    `(() => {
+      const clean = (value, limit = 180) =>
+        String(value || "")
+          .replace(/\\s+/g, " ")
+          .trim()
+          .slice(0, limit);
+
+      const visible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+
+        return (
+          rect.width > 2 &&
+          rect.height > 2 &&
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < innerHeight &&
+          rect.left < innerWidth &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0.02
+        );
+      };
+
+      document.querySelectorAll("[data-af-ai-id]").forEach((el) => {
+        delete el.dataset.afAiId;
+      });
+
+      const selector = [
+        "button",
+        "a[href]",
+        "input",
+        "textarea",
+        "select",
+        "[contenteditable=true]",
+        "[role=button]",
+        "[role=link]",
+        "[role=menuitem]",
+        "[role=checkbox]",
+        "[role=radio]",
+        "[role=tab]",
+        "[role=option]",
+        "[tabindex]"
+      ].join(",");
+
+      const seen = new Set();
+      const elements = [];
+
+      for (const el of document.querySelectorAll(selector)) {
+        if (elements.length >= 180) break;
+        if (seen.has(el) || !visible(el)) continue;
+        seen.add(el);
+
+        const id = "af-" + (elements.length + 1);
+        el.dataset.afAiId = id;
+
+        const rect = el.getBoundingClientRect();
+        const tag = el.tagName.toLowerCase();
+        const role = clean(el.getAttribute("role"), 60);
+        const ariaLabel = clean(el.getAttribute("aria-label"), 180);
+        const placeholder = clean(el.getAttribute("placeholder"), 180);
+        const title = clean(el.getAttribute("title"), 180);
+        const href = tag === "a" ? clean(el.href, 500) : "";
+        const inputType =
+          tag === "input" ? clean(el.getAttribute("type") || "text", 50) : "";
+        const text =
+          tag === "input" || tag === "textarea"
+            ? clean(el.getAttribute("aria-label") || el.getAttribute("placeholder"), 180)
+            : clean(el.innerText || el.textContent, 180);
+
+        elements.push({
+          id,
+          tag,
+          role,
+          text,
+          ariaLabel,
+          placeholder,
+          title,
+          href,
+          inputType,
+          disabled: Boolean(el.disabled || el.getAttribute("aria-disabled") === "true"),
+          checked:
+            typeof el.checked === "boolean"
+              ? Boolean(el.checked)
+              : el.getAttribute("aria-checked") || undefined,
+          rect: {
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          }
+        });
+      }
+
+      return {
+        url: location.href,
+        title: document.title,
+        viewport: {
+          width: innerWidth,
+          height: innerHeight
+        },
+        text: clean(document.body?.innerText, 7000),
+        elements
+      };
+    })()`
+  );
+}
+
+function describeAiProposal(proposal) {
+  if (!proposal) return "";
+
+  if (proposal.action === "input") {
+    return proposal.value
+      ? "Digitar: " + proposal.value
+      : "Preencher o campo selecionado.";
+  }
+
+  if (proposal.action === "key") {
+    return "Tecla: " + (proposal.key || "Enter");
+  }
+
+  if (proposal.action === "navigate") {
+    return proposal.url || "Abrir página";
+  }
+
+  if (proposal.action === "wait") {
+    return "Aguardar a interface terminar de atualizar.";
+  }
+
+  return proposal.targetId
+    ? "Elemento " + proposal.targetId
+    : "Ação no navegador";
+}
+
+async function showAiTargetBubble(proposal) {
+  if (!proposal?.targetId) return;
+
+  const data = JSON.stringify({
+    targetId: proposal.targetId,
+    action: proposal.action,
+    value: proposal.value || "",
+    label: proposal.label || "Próxima ação",
+  });
+
+  await aiAgentBrowser.executeJavaScript(
+    `(() => {
+      const proposal = ${data};
+      document.getElementById("__af_ai_bubble")?.remove();
+
+      document.querySelectorAll("[data-af-ai-highlight]").forEach((el) => {
+        el.style.outline = el.dataset.afAiPrevOutline || "";
+        el.style.outlineOffset = el.dataset.afAiPrevOutlineOffset || "";
+        delete el.dataset.afAiHighlight;
+        delete el.dataset.afAiPrevOutline;
+        delete el.dataset.afAiPrevOutlineOffset;
+      });
+
+      const target = document.querySelector(
+        '[data-af-ai-id="' + CSS.escape(proposal.targetId) + '"]'
+      );
+
+      if (!target) return false;
+
+      target.scrollIntoView({
+        block: "center",
+        inline: "center",
+        behavior: "smooth"
+      });
+
+      target.dataset.afAiPrevOutline = target.style.outline || "";
+      target.dataset.afAiPrevOutlineOffset = target.style.outlineOffset || "";
+      target.dataset.afAiHighlight = "1";
+      target.style.outline = "3px solid #6c8cff";
+      target.style.outlineOffset = "3px";
+
+      const bubble = document.createElement("div");
+      bubble.id = "__af_ai_bubble";
+      bubble.style.cssText = [
+        "position:fixed",
+        "z-index:2147483647",
+        "max-width:280px",
+        "padding:9px 11px",
+        "border-radius:11px",
+        "background:#27272a",
+        "color:#f5f5f5",
+        "font:600 12px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
+        "box-shadow:0 12px 32px rgba(0,0,0,.28)",
+        "pointer-events:none",
+        "white-space:normal"
+      ].join(";");
+
+      const actionText =
+        proposal.action === "input" && proposal.value
+          ? proposal.label + "\\n“" + proposal.value + "”"
+          : proposal.label;
+
+      bubble.textContent = actionText;
+      document.documentElement.appendChild(bubble);
+
+      requestAnimationFrame(() => {
+        const rect = target.getBoundingClientRect();
+        const bubbleRect = bubble.getBoundingClientRect();
+        const gap = 11;
+
+        let left = rect.left + rect.width / 2 - bubbleRect.width / 2;
+        left = Math.max(8, Math.min(innerWidth - bubbleRect.width - 8, left));
+
+        let top = rect.top - bubbleRect.height - gap;
+        if (top < 8) {
+          top = Math.min(innerHeight - bubbleRect.height - 8, rect.bottom + gap);
+        }
+
+        bubble.style.left = left + "px";
+        bubble.style.top = top + "px";
+      });
+
+      return true;
+    })()`
+  );
+}
+
+function setAiProposalButtonsVisible(visible) {
+  aiAgentApprove.classList.toggle("is-hidden", !visible);
+  aiAgentReject.classList.toggle("is-hidden", !visible);
+  aiAgentManual.classList.toggle("is-hidden", !visible);
+}
+
+async function requestAiAgentProposal(manualNote = "") {
+  if (!aiAgentAction || aiAgentManualMode) return;
+
+  const requestId = ++aiAgentRequestSerial;
+  aiAgentProposal.classList.add("is-hidden");
+  aiAgentBrowser.classList.add("is-reviewing");
+  setAiAgentStatus("IA analisando a página...", "working");
+  await clearAiTargetBubble();
+
+  try {
+    const snapshot = await snapshotAiBrowser();
+    aiBrowserUrl.textContent = snapshot?.url || "about:blank";
+
+    const result = await ipcRenderer.invoke("ai:action:next", {
+      objective: aiAgentAction.instruction,
+      snapshot,
+      rejected: aiAgentRejected,
+      manualNote,
+    });
+
+    if (requestId !== aiAgentRequestSerial || !aiAgentAction) return;
+
+    const proposal = result?.proposal;
+
+    if (!proposal) {
+      throw new Error("A IA não retornou uma próxima ação.");
+    }
+
+    aiAgentProposalState = proposal;
+    aiAgentProposal.classList.remove("is-hidden");
+    aiAgentProposalLabel.textContent =
+      proposal.label ||
+      (proposal.status === "done" ? "Objetivo concluído" : "Próxima ação");
+    aiAgentProposalDetail.textContent =
+      proposal.status === "done"
+        ? "A IA considera que o objetivo foi concluído."
+        : describeAiProposal(proposal);
+
+    if (proposal.status === "done") {
+      setAiAgentStatus("Objetivo concluído", "success");
+      aiAgentApprove.textContent = "Concluir";
+      setAiProposalButtonsVisible(true);
+      aiAgentReject.classList.add("is-hidden");
+      aiAgentManual.classList.add("is-hidden");
+      return;
+    }
+
+    aiAgentApprove.textContent = "Aprovar";
+    setAiProposalButtonsVisible(true);
+    setAiAgentStatus("Aguardando sua aprovação", "ready");
+    await showAiTargetBubble(proposal);
+  } catch (error) {
+    if (requestId !== aiAgentRequestSerial) return;
+
+    aiAgentProposalState = null;
+    setAiAgentStatus("Não consegui escolher a próxima ação", "error");
+    aiAgentProposal.classList.remove("is-hidden");
+    aiAgentProposalLabel.textContent = "A IA encontrou um problema";
+    aiAgentProposalDetail.textContent = error?.message || String(error);
+    setAiProposalButtonsVisible(false);
+    aiAgentManual.classList.remove("is-hidden");
+  }
+}
+
+async function executeAiAgentProposal() {
+  const proposal = aiAgentProposalState;
+
+  if (!proposal || !aiAgentAction) return;
+
+  if (proposal.status === "done") {
+    setAiAgentStatus("Execução finalizada", "success");
+    aiAgentProposal.classList.add("is-hidden");
+    await clearAiTargetBubble();
+    return;
+  }
+
+  aiAgentApprove.disabled = true;
+  aiAgentReject.disabled = true;
+  aiAgentManual.disabled = true;
+  setAiAgentStatus("Executando ação aprovada...", "working");
+
+  try {
+    await clearAiTargetBubble();
+
+    if (proposal.action === "navigate") {
+      aiAgentBrowser.loadURL(proposal.url);
+      await waitForAiBrowserLoad();
+    } else if (proposal.action === "wait") {
+      await waitAi(1200);
+    } else if (proposal.action === "click") {
+      const targetId = JSON.stringify(proposal.targetId);
+
+      const clicked = await aiAgentBrowser.executeJavaScript(
+        `(() => {
+          const target = document.querySelector(
+            '[data-af-ai-id="' + CSS.escape(${targetId}) + '"]'
+          );
+          if (!target) return false;
+          target.scrollIntoView({ block: "center", inline: "center" });
+          target.focus?.({ preventScroll: true });
+          target.click();
+          return true;
+        })()`
+      );
+
+      if (!clicked) {
+        throw new Error("O elemento aprovado não está mais disponível.");
+      }
+    } else if (proposal.action === "input") {
+      const targetId = JSON.stringify(proposal.targetId);
+      const value = JSON.stringify(proposal.value || "");
+
+      const filled = await aiAgentBrowser.executeJavaScript(
+        `(() => {
+          const target = document.querySelector(
+            '[data-af-ai-id="' + CSS.escape(${targetId}) + '"]'
+          );
+          if (!target) return false;
+
+          const value = ${value};
+          target.scrollIntoView({ block: "center", inline: "center" });
+          target.focus?.({ preventScroll: true });
+
+          if (target.isContentEditable) {
+            target.textContent = value;
+          } else {
+            const proto =
+              target.tagName === "TEXTAREA"
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+
+            if (setter) setter.call(target, value);
+            else target.value = value;
+          }
+
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          target.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        })()`
+      );
+
+      if (!filled) {
+        throw new Error("O campo aprovado não está mais disponível.");
+      }
+    } else if (proposal.action === "key") {
+      const targetId = JSON.stringify(proposal.targetId);
+
+      const focused = await aiAgentBrowser.executeJavaScript(
+        `(() => {
+          const target = document.querySelector(
+            '[data-af-ai-id="' + CSS.escape(${targetId}) + '"]'
+          );
+          if (!target) return false;
+          target.focus?.({ preventScroll: true });
+          return true;
+        })()`
+      );
+
+      if (!focused) {
+        throw new Error("O campo aprovado não está mais disponível.");
+      }
+
+      const key = proposal.key || "Enter";
+
+      if (typeof aiAgentBrowser.sendInputEvent === "function") {
+        aiAgentBrowser.sendInputEvent({ type: "keyDown", keyCode: key });
+        aiAgentBrowser.sendInputEvent({ type: "keyUp", keyCode: key });
+      } else {
+        await aiAgentBrowser.executeJavaScript(
+          `document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(
+            key
+          )}, bubbles: true }))`
+        );
+      }
+    }
+
+    aiAgentRejected = [];
+    aiAgentProposalState = null;
+    aiAgentProposal.classList.add("is-hidden");
+
+    await waitAi(900);
+    await requestAiAgentProposal();
+  } catch (error) {
+    setAiAgentStatus("A ação aprovada falhou", "error");
+    aiAgentProposal.classList.remove("is-hidden");
+    aiAgentProposalLabel.textContent = "Não consegui executar essa ação";
+    aiAgentProposalDetail.textContent = error?.message || String(error);
+    setAiProposalButtonsVisible(true);
+  } finally {
+    aiAgentApprove.disabled = false;
+    aiAgentReject.disabled = false;
+    aiAgentManual.disabled = false;
+  }
+}
+
+function enterAiAgentManualMode() {
+  if (!aiAgentAction) return;
+
+  aiAgentManualMode = true;
+  aiAgentRequestSerial += 1;
+  aiAgentBrowser.classList.remove("is-reviewing");
+  aiAgentProposalState = null;
+  aiAgentProposal.classList.add("is-hidden");
+  aiAgentManualBar.classList.remove("is-hidden");
+  setAiAgentStatus("Controle manual ativo", "manual");
+  void clearAiTargetBubble();
+  aiAgentBrowser.focus();
+}
+
+async function leaveAiAgentManualMode() {
+  if (!aiAgentAction) return;
+
+  aiAgentManualMode = false;
+  aiAgentBrowser.classList.add("is-reviewing");
+  aiAgentManualBar.classList.add("is-hidden");
+  aiAgentRejected = [];
+  setAiAgentStatus("Devolvendo controle para a IA...", "working");
+
+  await waitAi(350);
+  await requestAiAgentProposal(
+    "O usuário realizou uma interação manual na página. Continue a partir do estado atual."
+  );
+}
+
+async function startAiAgent(action) {
+  if (!action?.id) return;
+
+  aiAgentAction = action;
+  aiAgentProposalState = null;
+  aiAgentRejected = [];
+  aiAgentManualMode = false;
+  aiAgentRunning = true;
+  aiAgentRequestSerial += 1;
+
+  aiAgentName.textContent = action.name || "Ação com IA";
+  aiAgentObjective.textContent = action.instruction || "";
+  aiAgentProposal.classList.add("is-hidden");
+  aiAgentManualBar.classList.add("is-hidden");
+  aiAgentBrowser.classList.add("is-reviewing");
+  aiAgentWorkspace.classList.remove("is-hidden");
+  aiAgentWorkspace.closest(".ai-shell")?.classList.add("agent-active");
+  setAiAgentStatus("Abrindo navegador...", "working");
+
+  const initialUrl = action.startUrl || "about:blank";
+  aiBrowserUrl.textContent = initialUrl;
+
+  try {
+    aiAgentBrowser.loadURL(initialUrl);
+
+    if (initialUrl !== "about:blank") {
+      await waitForAiBrowserLoad();
+      await waitAi(650);
+    } else {
+      await waitAi(450);
+    }
+
+    if (!aiAgentAction || aiAgentAction.id !== action.id) return;
+
+    await requestAiAgentProposal();
+  } catch (error) {
+    setAiAgentStatus("Falha ao abrir o navegador", "error");
+    aiAgentProposal.classList.remove("is-hidden");
+    aiAgentProposalLabel.textContent = "Não foi possível iniciar";
+    aiAgentProposalDetail.textContent = error?.message || String(error);
+    setAiProposalButtonsVisible(false);
+    aiAgentManual.classList.remove("is-hidden");
+  }
+}
+
+async function closeAiAgent() {
+  aiAgentRequestSerial += 1;
+  aiAgentRunning = false;
+  aiAgentManualMode = false;
+  aiAgentAction = null;
+  aiAgentProposalState = null;
+  aiAgentRejected = [];
+
+  await clearAiTargetBubble();
+  aiAgentWorkspace.classList.add("is-hidden");
+  aiAgentWorkspace.closest(".ai-shell")?.classList.remove("agent-active");
+  aiAgentProposal.classList.add("is-hidden");
+  aiAgentManualBar.classList.add("is-hidden");
+  aiAgentBrowser.classList.remove("is-reviewing");
+  aiBrowserUrl.textContent = "about:blank";
+  aiAgentBrowser.loadURL("about:blank");
+}
+
 function renderAiActionCard(action, prepend = true) {
   if (!action?.id) return null;
 
@@ -1786,15 +2378,7 @@ function renderAiActionCard(action, prepend = true) {
     '<button class="button primary execution-start ai-action-execute" type="button">▶ Executar com IA</button>';
 
   card.querySelector(".ai-action-execute").addEventListener("click", () => {
-    openNoticeModal({
-      eyebrow: "EXECUÇÃO COM IA",
-      title: "A ação já está cadastrada",
-      description:
-        "O próximo módulo liga esta ação ao navegador ao vivo para a IA observar a página e propor cada clique.",
-      note:
-        "O cadastro já está salvo. Não é necessário pedir novamente para a Qwen explicar os passos.",
-      confirmLabel: "Entendi",
-    });
+    void startAiAgent(action);
   });
 
   if (prepend) {
@@ -3986,6 +4570,69 @@ document.addEventListener("pointerdown", (event) => {
   if (!aiPromptBar.contains(event.target)) {
     closeAiPromptMenus();
   }
+});
+
+aiAgentClose.addEventListener("click", () => {
+  void closeAiAgent();
+});
+
+aiAgentApprove.addEventListener("click", () => {
+  void executeAiAgentProposal();
+});
+
+aiAgentReject.addEventListener("click", async () => {
+  const proposal = aiAgentProposalState;
+  if (!proposal || proposal.status === "done") return;
+
+  aiAgentRejected.push({
+    action: proposal.action,
+    targetId: proposal.targetId || null,
+    value: proposal.value || null,
+    url: proposal.url || null,
+    label: proposal.label || null,
+  });
+
+  aiAgentProposalState = null;
+  aiAgentProposal.classList.add("is-hidden");
+  setAiAgentStatus("Buscando outra opção...", "working");
+  await clearAiTargetBubble();
+  await requestAiAgentProposal();
+});
+
+aiAgentManual.addEventListener("click", enterAiAgentManualMode);
+
+aiAgentManualDone.addEventListener("click", () => {
+  void leaveAiAgentManualMode();
+});
+
+aiBrowserBack.addEventListener("click", () => {
+  if (aiAgentBrowser.canGoBack?.()) {
+    aiAgentBrowser.goBack();
+  }
+});
+
+aiBrowserForward.addEventListener("click", () => {
+  if (aiAgentBrowser.canGoForward?.()) {
+    aiAgentBrowser.goForward();
+  }
+});
+
+aiBrowserReload.addEventListener("click", () => {
+  aiAgentBrowser.reload();
+});
+
+aiAgentBrowser.addEventListener("did-navigate", (event) => {
+  aiBrowserUrl.textContent = event.url || aiAgentBrowser.getURL?.() || "about:blank";
+});
+
+aiAgentBrowser.addEventListener("did-navigate-in-page", (event) => {
+  aiBrowserUrl.textContent = event.url || aiAgentBrowser.getURL?.() || "about:blank";
+});
+
+aiAgentBrowser.addEventListener("page-title-updated", () => {
+  if (!aiAgentRunning) return;
+  const url = aiAgentBrowser.getURL?.();
+  if (url) aiBrowserUrl.textContent = url;
 });
 
 profileLogoutButton.addEventListener("click", () => {
