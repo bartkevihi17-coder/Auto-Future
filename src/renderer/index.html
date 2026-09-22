@@ -6,59 +6,239 @@
     <title>Auto Future</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
+
   <body>
-    <main class="shell">
-      <header>
-        <div>
-          <p class="eyebrow">AUTO FUTURE · V0</p>
-          <h1>Grave uma vez.<br />Execute quando quiser.</h1>
-          <p class="subtitle">A primeira base do gravador de automacoes para navegador.</p>
-        </div>
-        <div id="status" class="status idle">Pronto</div>
-      </header>
+    <div class="background-image" aria-hidden="true"></div>
+    <div class="background-tint" aria-hidden="true"></div>
+    <div class="flow-orb flow-orb-a" aria-hidden="true"></div>
+    <div class="flow-orb flow-orb-b" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
 
-      <section class="card">
-        <label>
-          Nome da automacao
-          <input id="name" value="Minha primeira automacao" autocomplete="off" />
-        </label>
-
-        <label>
-          URL inicial
-          <input id="url" type="url" value="https://example.com" autocomplete="off" />
-        </label>
-
-        <div class="actions">
-          <button id="record" class="primary">● Gravar</button>
-          <button id="stop" disabled>■ Finalizar</button>
-          <button id="run" disabled>▶ Executar novamente</button>
-
-          <label class="check">
-            <input id="headless" type="checkbox" />
-            Executar em background
-          </label>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="section-title">
+    <section id="login-screen" class="login-screen">
+      <form id="login-form" class="glass login-card glow-panel">
+        <div class="login-brand">
+          <div class="brand-mark">AF</div>
           <div>
-            <p class="eyebrow">EVENTOS</p>
-            <h2>Acoes capturadas</h2>
+            <span>AUTO FUTURE</span>
+            <small>Automation workspace</small>
           </div>
-          <strong id="count">0</strong>
         </div>
 
-        <div id="events" class="events">
-          <p class="empty">Quando voce iniciar uma gravacao, os eventos aparecem aqui.</p>
+        <div class="login-copy">
+          <p class="eyebrow">ACESSO RESTRITO</p>
+          <h1>Bem-vindo.</h1>
+          <p>Entre com sua conta para acessar suas automacoes.</p>
         </div>
-      </section>
 
-      <section class="card note">
-        <strong>V0:</strong>
-        cliques, alteracoes de campos e navegacoes ja entram no fluxo. Senhas sao detectadas e nao sao salvas.
-      </section>
-    </main>
+        <label class="field">
+          <span>E-mail</span>
+          <input id="login-email" type="email" placeholder="seu@email.com" autocomplete="username" required />
+        </label>
+
+        <label class="field">
+          <span>Senha</span>
+          <input id="login-password" type="password" placeholder="Sua senha" autocomplete="current-password" required />
+        </label>
+
+        <p id="login-error" class="login-error" role="alert"></p>
+
+        <button id="login-button" class="button primary glow-button" type="submit">
+          Entrar
+        </button>
+
+        <p class="login-footnote">Contas sao liberadas pelo administrador.</p>
+      </form>
+    </section>
+
+    <div id="app-shell" class="app-shell is-hidden">
+      <aside id="sidebar" class="sidebar glass glow-panel">
+        <div class="sidebar-head">
+          <button id="brand-home" class="brand-button" type="button" aria-label="Ir para inicio">
+            <span class="brand-mark small">AF</span>
+            <span class="brand-text">
+              <strong>Auto Future</strong>
+              <small>Workspace</small>
+            </span>
+          </button>
+
+          <button id="sidebar-toggle" class="icon-button glow-button" type="button" aria-label="Recolher menu">
+            <span>‹</span>
+          </button>
+        </div>
+
+        <nav class="side-nav" aria-label="Menu principal">
+          <button class="nav-item active glow-button" type="button" data-page="home">
+            <span class="nav-icon">⌂</span>
+            <span class="nav-label">Inicio</span>
+          </button>
+
+          <button class="nav-item glow-button" type="button" data-page="recording">
+            <span class="nav-icon">●</span>
+            <span class="nav-label">Gravacao</span>
+          </button>
+
+          <button class="nav-item glow-button" type="button" data-page="recordings">
+            <span class="nav-icon">▤</span>
+            <span class="nav-label">Gravacoes</span>
+          </button>
+
+          <button class="nav-item glow-button" type="button" data-page="schedules">
+            <span class="nav-icon">◷</span>
+            <span class="nav-label">Agendamentos</span>
+          </button>
+
+          <button class="nav-item glow-button" type="button" data-page="runs">
+            <span class="nav-icon">↻</span>
+            <span class="nav-label">Execucoes</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+
+        <div class="profile">
+          <div class="avatar">A</div>
+          <div class="profile-copy">
+            <strong>Administrador</strong>
+            <small>Admin</small>
+          </div>
+          <button id="logout-button" class="icon-button subtle" type="button" aria-label="Sair">↗</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar glass">
+          <div>
+            <p class="eyebrow">AUTO FUTURE</p>
+            <h2 id="page-title">Inicio</h2>
+          </div>
+
+          <div class="topbar-actions">
+            <div id="status" class="status idle">
+              <span class="status-dot"></span>
+              <span id="status-text">Pronto</span>
+            </div>
+
+            <button class="button compact primary glow-button" type="button" data-open-page="recording">
+              <span>＋</span>
+              Nova gravacao
+            </button>
+          </div>
+        </header>
+
+        <section id="page-home" class="page active" data-page-view="home">
+          <div class="home-grid">
+            <div class="home-intro">
+              <p class="eyebrow">PAINEL</p>
+              <h1>Automacao sem atrito.</h1>
+              <p class="home-description">
+                Grave uma rotina no navegador uma vez e deixe o Auto Future repetir por voce.
+              </p>
+            </div>
+
+            <div class="quick-create glass">
+              <div class="quick-icon">●</div>
+              <div>
+                <strong>Cadastrar gravacao</strong>
+                <p>Abra o gravador e ensine uma nova rotina.</p>
+              </div>
+              <button class="icon-button glow-button" type="button" data-open-page="recording" aria-label="Cadastrar gravacao">→</button>
+            </div>
+          </div>
+
+          <div class="home-space">
+            <div class="ambient-line"></div>
+            <p>Seu espaco de automacoes fica aqui.</p>
+          </div>
+        </section>
+
+        <section id="page-recording" class="page" data-page-view="recording">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">NOVA AUTOMACAO</p>
+              <h1>Gravar navegador</h1>
+              <p>Informe o ponto de partida e execute a tarefa normalmente.</p>
+            </div>
+          </div>
+
+          <div class="recorder-layout">
+            <section class="glass recorder-card">
+              <div class="field-grid">
+                <label class="field">
+                  <span>Nome da gravacao</span>
+                  <input id="record-name" value="Minha primeira automacao" autocomplete="off" />
+                </label>
+
+                <label class="field">
+                  <span>URL inicial</span>
+                  <input id="record-url" type="url" value="https://example.com" autocomplete="off" />
+                </label>
+              </div>
+
+              <div class="recorder-actions">
+                <button id="record-button" class="button primary compact glow-button" type="button">● Gravar</button>
+                <button id="stop-button" class="button compact glow-button" type="button" disabled>■ Finalizar</button>
+                <button id="run-button" class="button compact glow-button" type="button" disabled>▶ Executar</button>
+
+                <label class="toggle-row">
+                  <input id="headless-input" type="checkbox" />
+                  <span class="toggle"></span>
+                  <span>Background</span>
+                </label>
+              </div>
+            </section>
+
+            <section class="glass events-card">
+              <div class="section-title">
+                <div>
+                  <p class="eyebrow">EVENTOS</p>
+                  <h3>Acoes capturadas</h3>
+                </div>
+                <strong id="event-count">0</strong>
+              </div>
+
+              <div id="events" class="events">
+                <p class="empty">Os eventos da gravacao aparecem aqui.</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" data-page-view="recordings">
+          <div class="placeholder glass">
+            <span class="placeholder-icon">▤</span>
+            <p class="eyebrow">EM BREVE</p>
+            <h1>Gravacoes</h1>
+            <p>A biblioteca das automacoes salvas entra na proxima etapa.</p>
+          </div>
+        </section>
+
+        <section class="page" data-page-view="schedules">
+          <div class="placeholder glass">
+            <span class="placeholder-icon">◷</span>
+            <p class="eyebrow">EM BREVE</p>
+            <h1>Agendamentos</h1>
+            <p>Aqui voce vai escolher dias, horarios e repeticoes.</p>
+          </div>
+        </section>
+
+        <section class="page" data-page-view="runs">
+          <div class="placeholder glass">
+            <span class="placeholder-icon">↻</span>
+            <p class="eyebrow">EM BREVE</p>
+            <h1>Execucoes</h1>
+            <p>Historico, logs e falhas das automacoes ficarao aqui.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="view-loading" class="view-loading" aria-hidden="true">
+      <div class="loader glass">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
 
     <script src="./app.js"></script>
   </body>
