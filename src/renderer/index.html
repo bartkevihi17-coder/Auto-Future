@@ -44,49 +44,57 @@
     </section>
 
     <div id="app-shell" class="app-shell is-hidden">
-      <aside id="sidebar" class="sidebar glass">
+      <aside id="sidebar" class="sidebar line-sidebar-shell" aria-label="Menu lateral">
         <div class="sidebar-head">
-          <button id="brand-home" class="brand-button" type="button">
+          <button id="brand-home" class="brand-button" type="button" aria-label="Voltar para o início">
             <span class="brand-mark small">AF</span>
             <span class="brand-text">
               <strong>Auto Future</strong>
               <small>Workspace</small>
             </span>
           </button>
-          <button id="sidebar-toggle" class="icon-button glow-button" type="button"><span>‹</span></button>
+          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Recolher menu"><span>‹</span></button>
         </div>
 
-        <nav class="side-nav">
-          <button class="nav-item active glow-button" type="button" data-page="home">
-            <span class="nav-icon">⌂</span><span class="nav-label">Início</span>
-          </button>
-          <button class="nav-item glow-button" type="button" data-page="recording">
-            <span class="nav-icon">●</span><span class="nav-label">Gravação</span>
-          </button>
-          <button class="nav-item glow-button" type="button" data-page="editor">
-            <span class="nav-icon">✦</span><span class="nav-label">Editor</span>
-          </button>
-          <button class="nav-item glow-button" type="button" data-page="recordings">
-            <span class="nav-icon">▤</span><span class="nav-label">Gravações</span>
-          </button>
-          <button class="nav-item glow-button" type="button" data-page="schedules">
-            <span class="nav-icon">◷</span><span class="nav-label">Agendamentos</span>
-          </button>
-          <button class="nav-item glow-button" type="button" data-page="runs">
-            <span class="nav-icon">↻</span><span class="nav-label">Execuções</span>
-          </button>
+        <nav id="line-sidebar" class="line-sidebar">
+          <ul class="line-sidebar__list">
+            <li class="line-sidebar__item active" data-page="home">
+              <span class="line-sidebar__marker"></span>
+              <button class="line-sidebar__label" type="button" data-page="home">Início</button>
+            </li>
+            <li class="line-sidebar__item" data-page="recording">
+              <span class="line-sidebar__marker"></span>
+              <button class="line-sidebar__label" type="button" data-page="recording">Gravar</button>
+            </li>
+            <li class="line-sidebar__item" data-page="editor">
+              <span class="line-sidebar__marker"></span>
+              <button class="line-sidebar__label" type="button" data-page="editor">Editor</button>
+            </li>
+            <li class="line-sidebar__item" data-page="recordings">
+              <span class="line-sidebar__marker"></span>
+              <button class="line-sidebar__label" type="button" data-page="recordings">Gravações</button>
+            </li>
+            <li class="line-sidebar__item" data-page="schedules">
+              <span class="line-sidebar__marker"></span>
+              <button class="line-sidebar__label" type="button" data-page="schedules">Agendamentos</button>
+            </li>
+            <li class="line-sidebar__item" data-page="runs">
+              <span class="line-sidebar__marker"></span>
+              <button class="line-sidebar__label" type="button" data-page="runs">Histórico</button>
+            </li>
+          </ul>
         </nav>
 
         <div class="sidebar-spacer"></div>
         <div class="profile">
           <div class="avatar">A</div>
           <div class="profile-copy"><strong>Administrador</strong><small>Admin</small></div>
-          <button id="logout-button" class="icon-button subtle" type="button">↗</button>
+          <button id="logout-button" class="icon-button subtle" type="button" aria-label="Sair">↗</button>
         </div>
       </aside>
 
       <main class="workspace">
-        <header class="topbar glass">
+        <header class="topbar">
           <div>
             <p class="eyebrow">AUTO FUTURE</p>
             <h2 id="page-title">Início</h2>
@@ -95,24 +103,61 @@
             <div id="status" class="status idle">
               <span class="status-dot"></span><span id="status-text">Pronto</span>
             </div>
-            <button class="button compact primary glow-button" type="button" data-open-page="recording">＋ Nova gravação</button>
           </div>
         </header>
 
-        <section class="page active" data-page-view="home">
-          <div class="home-grid">
-            <div class="home-intro">
-              <p class="eyebrow">PAINEL</p>
-              <h1>Automação sem atrito.</h1>
-              <p class="home-description">Grave uma rotina uma vez e deixe o Auto Future repetir por você.</p>
-            </div>
-            <div class="quick-create glass">
-              <div class="quick-icon">●</div>
-              <div><strong>Cadastrar gravação</strong><p>Ensine uma nova rotina ao sistema.</p></div>
-              <button class="icon-button glow-button" type="button" data-open-page="recording">→</button>
-            </div>
+        <section class="page active home-page" data-page-view="home">
+          <div class="home-hero">
+            <p class="eyebrow">PAINEL</p>
+            <h1>O que você quer automatizar?</h1>
+            <p>Comece uma gravação, edite um fluxo ou deixe uma rotina preparada para rodar sozinha.</p>
           </div>
-          <div class="home-space"><p>Seu espaço de automações fica aqui.</p></div>
+
+          <section id="home-bento" class="home-bento bento-section">
+            <button class="magic-card magic-bento-card magic-bento-card--border-glow featured" type="button" data-open-page="recording">
+              <div class="magic-card__top">
+                <span class="magic-card__icon">●</span>
+                <span class="magic-card__meta">NOVA AUTOMAÇÃO</span>
+              </div>
+              <div class="magic-card__content">
+                <h3>Gravar</h3>
+                <p>Faça a tarefa uma vez no navegador. O Auto Future registra os passos.</p>
+              </div>
+            </button>
+
+            <button class="magic-card magic-bento-card magic-bento-card--border-glow" type="button" data-open-page="editor">
+              <div class="magic-card__top">
+                <span class="magic-card__icon">✦</span>
+                <span class="magic-card__meta">TIMELINE</span>
+              </div>
+              <div class="magic-card__content">
+                <h3>Editar</h3>
+                <p>Ajuste cliques, digitações, espera e sequência visualmente.</p>
+              </div>
+            </button>
+
+            <button class="magic-card magic-bento-card magic-bento-card--border-glow" type="button" data-open-page="schedules">
+              <div class="magic-card__top">
+                <span class="magic-card__icon">◷</span>
+                <span class="magic-card__meta">ROTINAS</span>
+              </div>
+              <div class="magic-card__content">
+                <h3>Agendamentos</h3>
+                <p>Defina dias, horários e repetições para executar automaticamente.</p>
+              </div>
+            </button>
+
+            <button class="magic-card magic-bento-card magic-bento-card--border-glow" type="button" data-open-page="runs">
+              <div class="magic-card__top">
+                <span class="magic-card__icon">↻</span>
+                <span class="magic-card__meta">EXECUÇÕES</span>
+              </div>
+              <div class="magic-card__content">
+                <h3>Histórico</h3>
+                <p>Veja o que rodou, onde parou e o que precisa da sua atenção.</p>
+              </div>
+            </button>
+          </section>
         </section>
 
         <section class="page" data-page-view="recording">
@@ -125,7 +170,7 @@
           </div>
 
           <div class="recorder-layout">
-            <section class="glass recorder-card">
+            <section class="surface-card magic-card magic-bento-card magic-bento-card--border-glow recorder-card">
               <label class="field"><span>Nome da gravação</span><input id="record-name" value="Minha primeira automação" /></label>
               <label class="field"><span>URL inicial</span><input id="record-url" type="url" value="https://example.com" /></label>
               <div class="recorder-actions">
@@ -138,7 +183,7 @@
               </div>
             </section>
 
-            <section class="glass events-card">
+            <section class="surface-card magic-card magic-bento-card magic-bento-card--border-glow events-card">
               <div class="section-title">
                 <div><p class="eyebrow">EVENTOS</p><h3>Ações capturadas</h3></div>
                 <strong id="event-count">0</strong>
@@ -161,7 +206,7 @@
             </div>
           </div>
 
-          <div id="editor-empty" class="placeholder glass">
+          <div id="editor-empty" class="placeholder surface-card magic-card magic-bento-card magic-bento-card--border-glow">
             <span class="placeholder-icon">✦</span>
             <p class="eyebrow">EDITOR</p>
             <h1>Grave algo primeiro.</h1>
@@ -169,24 +214,23 @@
           </div>
 
           <div id="editor-workspace" class="editor-workspace is-hidden">
-            <section class="glass video-panel">
+            <section class="surface-card magic-card magic-bento-card magic-bento-card--border-glow video-panel">
               <div class="video-frame">
                 <video id="recording-video" controls></video>
                 <div id="video-missing" class="video-missing is-hidden">Vídeo não disponível.</div>
               </div>
             </section>
 
-            <section class="glass inspector-panel">
+            <section class="surface-card magic-card magic-bento-card magic-bento-card--border-glow inspector-panel">
               <p class="eyebrow">AÇÃO SELECIONADA</p>
               <h3 id="inspector-type">Selecione uma ação</h3>
-
               <label class="field"><span>Delay antes da ação (ms)</span><input id="inspector-delay" type="number" min="0" disabled /></label>
               <label class="field"><span>Seletor / destino</span><input id="inspector-selector" disabled /></label>
               <label class="field"><span>Valor digitado</span><input id="inspector-value" disabled /></label>
               <button id="delete-action-button" class="button compact danger" type="button" disabled>Excluir ação</button>
             </section>
 
-            <section class="glass timeline-panel">
+            <section class="surface-card magic-card magic-bento-card magic-bento-card--border-glow timeline-panel">
               <div class="timeline-top">
                 <div><p class="eyebrow">TIMELINE</p><h3>Ações da gravação</h3></div>
                 <span id="timeline-duration">0.0s</span>
@@ -198,19 +242,38 @@
         </section>
 
         <section class="page" data-page-view="recordings">
-          <div class="placeholder glass"><span class="placeholder-icon">▤</span><p class="eyebrow">EM BREVE</p><h1>Gravações</h1><p>A biblioteca completa entra na próxima etapa.</p></div>
+          <div class="placeholder surface-card magic-card magic-bento-card magic-bento-card--border-glow">
+            <span class="placeholder-icon">▤</span><p class="eyebrow">EM BREVE</p><h1>Gravações</h1><p>A biblioteca completa entra na próxima etapa.</p>
+          </div>
         </section>
+
         <section class="page" data-page-view="schedules">
-          <div class="placeholder glass"><span class="placeholder-icon">◷</span><p class="eyebrow">EM BREVE</p><h1>Agendamentos</h1><p>Dias, horários e repetição ficarão aqui.</p></div>
+          <div class="placeholder surface-card magic-card magic-bento-card magic-bento-card--border-glow">
+            <span class="placeholder-icon">◷</span><p class="eyebrow">EM BREVE</p><h1>Agendamentos</h1><p>Dias, horários e repetição ficarão aqui.</p>
+          </div>
         </section>
+
         <section class="page" data-page-view="runs">
-          <div class="placeholder glass"><span class="placeholder-icon">↻</span><p class="eyebrow">EM BREVE</p><h1>Execuções</h1><p>Histórico, logs e falhas das automações ficarão aqui.</p></div>
+          <div class="placeholder surface-card magic-card magic-bento-card magic-bento-card--border-glow">
+            <span class="placeholder-icon">↻</span><p class="eyebrow">EM BREVE</p><h1>Histórico</h1><p>Execuções, logs e falhas das automações ficarão aqui.</p>
+          </div>
         </section>
       </main>
+
+      <nav id="bottom-rubber" class="rubber-dock" aria-label="Atalhos principais">
+        <div class="rubber-segment" role="radiogroup" aria-label="Navegação principal" data-held="false">
+          <div class="rubber-segment__thumb" aria-hidden="true"></div>
+          <button class="rubber-segment__item active" type="button" role="radio" aria-checked="true" data-page="home">Início</button>
+          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="recording">Gravar</button>
+          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="editor">Editor</button>
+          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="schedules">Agenda</button>
+          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="runs">Histórico</button>
+        </div>
+      </nav>
     </div>
 
     <div id="view-loading" class="view-loading">
-      <div class="loader glass"><span></span><span></span><span></span></div>
+      <div class="loader"><span></span><span></span><span></span></div>
     </div>
 
     <script src="./app.js"></script>
