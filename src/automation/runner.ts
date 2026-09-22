@@ -38,6 +38,58 @@ function resolveActionFrame(page: Page, action: AutomationAction): Frame {
   return page.mainFrame();
 }
 
+async function waitForOptimizedPage(page: Page): Promise<void> {
+  await page
+    .waitForLoadState("domcontentloaded", { timeout: 15_000 })
+    .catch(() => undefined);
+
+  await page
+    .waitForFunction(
+      () => document.readyState === "complete",
+      undefined,
+      { timeout: 12_000 }
+    )
+    .catch(() => undefined);
+
+  // Apps with polling/websockets may never reach networkidle. Treat it as a
+  // best-effort final stabilization step instead of blocking the automation.
+  await page
+    .waitForLoadState("networkidle", { timeout: 2_500 })
+    .catch(() => undefined);
+}
+
+async function waitForOptimizedTarget(
+  page: Page,
+  action: AutomationAction
+): Promise<void> {
+  await page
+    .waitForLoadState("domcontentloaded", { timeout: 15_000 })
+    .catch(() => undefined);
+
+  if (!action.selector) {
+    await waitForOptimizedPage(page);
+    return;
+  }
+
+  const frame = resolveActionFrame(page, action);
+  const locator = frame.locator(action.selector).first();
+
+  if (action.type === "click") {
+    await locator.waitFor({ state: "visible", timeout: 20_000 });
+    await locator.click({ trial: true, timeout: 20_000 });
+    return;
+  }
+
+  if (action.type === "input") {
+    await locator.waitFor({ state: "visible", timeout: 20_000 });
+    return;
+  }
+
+  if (action.type === "key") {
+    await locator.waitFor({ state: "attached", timeout: 20_000 });
+  }
+}
+
 async function actionPoint(
   page: Page,
   frame: Frame,
@@ -313,8 +365,16 @@ export async function runRecording(
       );
     };
 
+    const optimized = recording.optimizationEnabled !== false;
+
     if (recording.initialUrl && page.url() !== recording.initialUrl) {
-      await page.goto(recording.initialUrl, { waitUntil: "domcontentloaded" });
+      await page.goto(recording.initialUrl, {
+        waitUntil: optimized ? "load" : "domcontentloaded",
+      });
+
+      if (optimized) {
+        await waitForOptimizedPage(page);
+      }
     }
 
     const total = recording.actions.length;
@@ -347,11 +407,15 @@ export async function runRecording(
       const recordedDelayMs = Math.max(0, Number(action.delayMs) || 0);
       const delayMs = recordedDelayMs / speed;
 
-      if (delayMs > 0) {
+      if (!optimized && delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
 
       const actionPage = await resolvePageForAction(action);
+
+      if (optimized && action.type !== "navigate") {
+        await waitForOptimizedTarget(actionPage, action);
+      }
       const nextAction = recording.actions[index + 1];
 
       let expectedNewPage: Promise<Page | null> | null = null;
@@ -371,8 +435,15 @@ export async function runRecording(
       switch (action.type) {
         case "navigate": {
           if (comparableUrl(actionPage.url()) !== comparableUrl(action.url)) {
-            await actionPage.goto(action.url, { waitUntil: "domcontentloaded" });
+            await actionPage.goto(action.url, {
+              waitUntil: optimized ? "load" : "domcontentloaded",
+            });
           }
+
+          if (optimized) {
+            await waitForOptimizedPage(actionPage);
+          }
+
           break;
         }
 
@@ -384,9 +455,13 @@ export async function runRecording(
 
             if (openedPage && !openedPage.isClosed()) {
               claimPage(nextAction.pageId, openedPage);
-              await openedPage
-                .waitForLoadState("domcontentloaded", { timeout: 10_000 })
-                .catch(() => undefined);
+              if (optimized) {
+                await waitForOptimizedPage(openedPage);
+              } else {
+                await openedPage
+                  .waitForLoadState("domcontentloaded", { timeout: 10_000 })
+                  .catch(() => undefined);
+              }
             }
           }
 

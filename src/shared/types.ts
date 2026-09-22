@@ -41,6 +41,7 @@ export interface AutomationRecording {
   videoPath?: string;
   videoSegments?: AutomationVideoSegment[];
   executionSpeed?: ExecutionSpeed;
+  optimizationEnabled?: boolean;
 }
 
 export interface RunOptions {

@@ -41,6 +41,12 @@ const confirmModalDescription = document.querySelector("#confirm-modal-descripti
 const confirmModalNote = document.querySelector("#confirm-modal-note");
 const confirmModalCancel = document.querySelector("#confirm-modal-cancel");
 const confirmModalConfirm = document.querySelector("#confirm-modal-confirm");
+const optimizationModal = document.querySelector("#optimization-modal");
+const optimizationModalTitle = document.querySelector("#optimization-modal-title");
+const optimizationModalDescription = document.querySelector("#optimization-modal-description");
+const optimizationModalNote = document.querySelector("#optimization-modal-note");
+const optimizationModalCancel = document.querySelector("#optimization-modal-cancel");
+const optimizationModalConfirm = document.querySelector("#optimization-modal-confirm");
 
 const scheduleMap = document.querySelector("#schedule-map");
 const scheduleList = document.querySelector("#schedule-list");
@@ -107,6 +113,8 @@ const editorScheduleButton = document.querySelector("#editor-schedule-button");
 const editorSpeedGauge = document.querySelector("#editor-speed-gauge");
 const executionSpeedGauge = document.querySelector("#execution-speed-gauge");
 const executionSpeedText = document.querySelector("#execution-speed-text");
+const editorOptimizationButton = document.querySelector("#editor-optimization-button");
+const executionOptimizationButton = document.querySelector("#execution-optimization-button");
 
 const executionTitle = document.querySelector("#execution-title");
 const executionName = document.querySelector("#execution-name");
@@ -136,6 +144,7 @@ let currentScheduleId = null;
 let currentVideoPageId = null;
 let pendingVideoSeekSeconds = 0;
 let pendingConfirmAction = null;
+let pendingOptimizationEnabled = null;
 let rubberActiveIndex = 0;
 let rubberDrag = null;
 let suppressRubberClick = false;
@@ -1275,6 +1284,98 @@ function initSpeedGauge(root, onChange) {
   return controller;
 }
 
+function refreshExecutionMeta() {
+  if (!currentRecording) return;
+
+  const actions = currentRecording.actions || [];
+  const optimized = currentRecording.optimizationEnabled !== false;
+
+  if (optimized) {
+    executionMeta.textContent =
+      actions.length +
+      " ações · otimização ativa · executa conforme cada alvo fica pronto";
+    return;
+  }
+
+  const speed = normalizeSpeed(currentRecording.executionSpeed);
+  const times = cumulativeTimes(actions);
+  const recordedMs = times[times.length - 1] || 0;
+
+  executionMeta.textContent =
+    actions.length + " ações · " +
+    formatSeconds(recordedMs / speed) +
+    " estimados em " + speedLabel(speed);
+}
+
+function renderOptimizationState() {
+  const enabled = currentRecording?.optimizationEnabled !== false;
+
+  [editorOptimizationButton, executionOptimizationButton].forEach((button) => {
+    if (!button) return;
+
+    button.classList.toggle("is-active", enabled);
+    button.setAttribute("aria-pressed", enabled ? "true" : "false");
+
+    const mark = button.querySelector(".optimization-toggle__mark");
+    const state = button.querySelector(".optimization-toggle__state");
+
+    if (mark) mark.textContent = enabled ? "✓" : "○";
+    if (state) state.textContent = enabled ? "Ativada" : "Desativada";
+  });
+}
+
+function closeOptimizationModal() {
+  optimizationModal.classList.add("is-hidden");
+  optimizationModalConfirm.disabled = false;
+  optimizationModalCancel.disabled = false;
+  pendingOptimizationEnabled = null;
+}
+
+function openOptimizationModal() {
+  if (!currentRecording) return;
+
+  const enabled = currentRecording.optimizationEnabled !== false;
+  pendingOptimizationEnabled = !enabled;
+
+  if (enabled) {
+    optimizationModalTitle.textContent = "Desativar otimização?";
+    optimizationModalDescription.textContent =
+      "Com a otimização desligada, a execução volta a depender dos intervalos gravados entre as ações.";
+    optimizationModalNote.textContent =
+      "Os delays da timeline voltam a ser respeitados e a velocidade 1x / 1.5x / 2x passa a controlar esses intervalos.";
+    optimizationModalConfirm.textContent = "Desativar otimização";
+    optimizationModalConfirm.classList.remove("primary");
+    optimizationModalConfirm.classList.add("danger");
+  } else {
+    optimizationModalTitle.textContent = "Ativar otimização?";
+    optimizationModalDescription.textContent =
+      "O Auto Future vai ignorar os delays gravados e avançar assim que a página e o alvo específico estiverem prontos para interação.";
+    optimizationModalNote.textContent =
+      "Botões aguardam ficar visíveis e acionáveis; campos aguardam ficar disponíveis; navegações aguardam o carregamento da página.";
+    optimizationModalConfirm.textContent = "Ativar otimização";
+    optimizationModalConfirm.classList.remove("danger");
+    optimizationModalConfirm.classList.add("primary");
+  }
+
+  optimizationModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => optimizationModalConfirm.focus());
+}
+
+async function setOptimizationState(enabled, persist = true) {
+  if (!currentRecording) return;
+
+  currentRecording.optimizationEnabled = enabled !== false;
+  renderOptimizationState();
+  refreshExecutionMeta();
+
+  if (persist) {
+    await ipcRenderer.invoke(
+      "recording:update-optimization",
+      currentRecording.optimizationEnabled
+    );
+  }
+}
+
 function setCurrentExecutionSpeed(speed, source = "editor") {
   const normalized = normalizeSpeed(speed);
 
@@ -1293,13 +1394,7 @@ function setCurrentExecutionSpeed(speed, source = "editor") {
   }
 
   if (currentRecording) {
-    const actions = currentRecording.actions || [];
-    const times = cumulativeTimes(actions);
-    const recordedMs = times[times.length - 1] || 0;
-    executionMeta.textContent =
-      actions.length + " ações · " +
-      formatSeconds(recordedMs / normalized) +
-      " estimados em " + speedLabel(normalized);
+    refreshExecutionMeta();
 
     if (source === "editor" || source === "execution") {
       void ipcRenderer.invoke("recording:update-speed", normalized).catch(() => undefined);
@@ -1513,6 +1608,7 @@ function loadEditor(recording) {
   currentRecording = {
     ...recording,
     executionSpeed: normalizeSpeed(recording.executionSpeed),
+    optimizationEnabled: recording.optimizationEnabled !== false,
   };
   selectedActionId = currentRecording.actions?.[0]?.id || null;
   timelineZoom = 1;
@@ -1525,6 +1621,7 @@ function loadEditor(recording) {
 
   saveEditorButton.disabled = false;
   setCurrentExecutionSpeed(currentRecording.executionSpeed, "load");
+  renderOptimizationState();
 
   const editorSchedules = savedSchedules.filter(
     (schedule) => schedule.automationId === currentRecording.id
@@ -1667,17 +1764,19 @@ function setExecutionProgress(value, label, stepText) {
 
 function prepareExecution(recording) {
   const actions = recording?.actions || [];
-  const times = cumulativeTimes(actions);
-  const totalMs = times[times.length - 1] || 0;
   const speed = normalizeSpeed(recording?.executionSpeed);
 
-  executionTitle.textContent = recording?.name || "Automação pronta";
-  executionName.textContent = recording?.name || "Automação";
-  executionMeta.textContent =
-    actions.length + " ações · " +
-    formatSeconds(totalMs / speed) +
-    " estimados em " + speedLabel(speed);
+  currentRecording = {
+    ...recording,
+    executionSpeed: speed,
+    optimizationEnabled: recording?.optimizationEnabled !== false,
+  };
+
+  executionTitle.textContent = currentRecording?.name || "Automação pronta";
+  executionName.textContent = currentRecording?.name || "Automação";
   setCurrentExecutionSpeed(speed, "load");
+  renderOptimizationState();
+  refreshExecutionMeta();
 
   executionStartButton.disabled = actions.length === 0;
   executionDialValue = 0;
@@ -2184,6 +2283,11 @@ browserSetupModal.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
 
+  if (!optimizationModal.classList.contains("is-hidden")) {
+    closeOptimizationModal();
+    return;
+  }
+
   if (!confirmModal.classList.contains("is-hidden")) {
     closeConfirmModal();
     return;
@@ -2250,6 +2354,7 @@ saveEditorButton.addEventListener("click", async () => {
     const result = await ipcRenderer.invoke("recording:update-last", {
       actions: currentRecording.actions,
       executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
+      optimizationEnabled: currentRecording.optimizationEnabled !== false,
     });
 
     currentRecording = result.recording;
@@ -2282,6 +2387,7 @@ executionStartButton.addEventListener("click", async () => {
     const updated = await ipcRenderer.invoke("recording:update-last", {
       actions: currentRecording.actions,
       executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
+      optimizationEnabled: currentRecording.optimizationEnabled !== false,
     });
     currentRecording = updated.recording;
 
@@ -2573,6 +2679,48 @@ recordingVideo.addEventListener("timeupdate", updateVideoUI);
 recordingVideo.addEventListener("play", updateVideoUI);
 recordingVideo.addEventListener("pause", updateVideoUI);
 recordingVideo.addEventListener("ended", updateVideoUI);
+
+editorOptimizationButton.addEventListener("click", openOptimizationModal);
+executionOptimizationButton.addEventListener("click", openOptimizationModal);
+
+optimizationModalCancel.addEventListener("click", closeOptimizationModal);
+
+optimizationModal.addEventListener("click", (event) => {
+  if (event.target === optimizationModal) {
+    closeOptimizationModal();
+  }
+});
+
+optimizationModalConfirm.addEventListener("click", async () => {
+  if (pendingOptimizationEnabled === null || !currentRecording) {
+    closeOptimizationModal();
+    return;
+  }
+
+  const targetState = pendingOptimizationEnabled;
+  optimizationModalConfirm.disabled = true;
+  optimizationModalCancel.disabled = true;
+  optimizationModalConfirm.textContent = targetState
+    ? "Ativando..."
+    : "Desativando...";
+
+  try {
+    await setOptimizationState(targetState, true);
+    setStatus(
+      targetState ? "Otimização ativada" : "Otimização desativada",
+      "success"
+    );
+    closeOptimizationModal();
+  } catch (error) {
+    optimizationModalConfirm.disabled = false;
+    optimizationModalCancel.disabled = false;
+    optimizationModalConfirm.textContent = targetState
+      ? "Tentar ativar"
+      : "Tentar desativar";
+    optimizationModalNote.textContent = error?.message || String(error);
+    setStatus("Erro ao alterar otimização", "error");
+  }
+});
 
 initSpeedGauge(editorSpeedGauge, (speed) => {
   setCurrentExecutionSpeed(speed, "editor");

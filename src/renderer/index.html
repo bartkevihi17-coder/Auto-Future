@@ -327,6 +327,15 @@
                 </div>
               </section>
 
+              <button id="editor-optimization-button" class="optimization-toggle is-active" type="button" aria-pressed="true">
+                <span class="optimization-toggle__mark">✓</span>
+                <span class="optimization-toggle__copy">
+                  <strong>Otimização</strong>
+                  <small>Esperar o alvo ficar pronto em vez de usar delay.</small>
+                </span>
+                <span class="optimization-toggle__state">Ativada</span>
+              </button>
+
               <section class="editor-schedule-summary">
                 <div>
                   <p class="eyebrow">REPETIÇÕES</p>
@@ -411,6 +420,15 @@
                   </div>
                 </div>
               </section>
+
+              <button id="execution-optimization-button" class="optimization-toggle is-active optimization-toggle--execution" type="button" aria-pressed="true">
+                <span class="optimization-toggle__mark">✓</span>
+                <span class="optimization-toggle__copy">
+                  <strong>Otimização</strong>
+                  <small>Executa assim que página, botão ou campo estiver pronto.</small>
+                </span>
+                <span class="optimization-toggle__state">Ativada</span>
+              </button>
 
               <label class="toggle-row execution-toggle">
                 <input id="headless-input" type="checkbox" />
@@ -714,6 +732,44 @@
         <div class="modal-actions">
           <button id="confirm-modal-cancel" class="button" type="button">Cancelar</button>
           <button id="confirm-modal-confirm" class="button danger" type="button">Confirmar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="optimization-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="optimization-modal-title">
+      <div class="modal-card optimization-modal-card">
+        <div class="optimization-modal-icon">⚡</div>
+
+        <div class="modal-copy">
+          <p class="eyebrow">OTIMIZAÇÃO INTELIGENTE</p>
+          <h3 id="optimization-modal-title">Otimização ativada</h3>
+          <p id="optimization-modal-description">
+            Com a otimização ativa, o Auto Future deixa de depender do intervalo gravado entre as ações.
+          </p>
+
+          <div class="optimization-explainer">
+            <div>
+              <span>01</span>
+              <p><strong>Sem espera artificial.</strong> O delay gravado deixa de controlar o momento da próxima ação.</p>
+            </div>
+            <div>
+              <span>02</span>
+              <p><strong>Espera o alvo.</strong> Página, botão ou campo precisa estar carregado e pronto para interação.</p>
+            </div>
+            <div>
+              <span>03</span>
+              <p><strong>Executa imediatamente.</strong> Assim que o alvo responde, a próxima ação é disparada.</p>
+            </div>
+          </div>
+
+          <p id="optimization-modal-note" class="modal-note">
+            Desativando, a automação volta a respeitar os delays gravados e a velocidade 1x / 1.5x / 2x.
+          </p>
+        </div>
+
+        <div class="modal-actions">
+          <button id="optimization-modal-cancel" class="button" type="button">Cancelar</button>
+          <button id="optimization-modal-confirm" class="button primary" type="button">Entendi</button>
         </div>
       </div>
     </div>

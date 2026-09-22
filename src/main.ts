@@ -56,6 +56,10 @@ function normalizeExecutionSpeed(value: unknown): ExecutionSpeed {
   return 1;
 }
 
+function normalizeOptimization(value: unknown): boolean {
+  return value !== false;
+}
+
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -75,6 +79,7 @@ function withVideoUrl(recording: AutomationRecording) {
   return {
     ...recording,
     executionSpeed: normalizeExecutionSpeed(recording.executionSpeed),
+    optimizationEnabled: normalizeOptimization(recording.optimizationEnabled),
     videoUrl: recording.videoPath
       ? pathToFileURL(recording.videoPath).href
       : null,
@@ -93,6 +98,7 @@ async function persistRecording(recording: AutomationRecording): Promise<string>
 
   recording.updatedAt = new Date().toISOString();
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
+  recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
 
   const filePath = path.join(dir, recording.id + ".json");
   await fs.writeFile(filePath, JSON.stringify(recording, null, 2), "utf8");
@@ -104,6 +110,7 @@ async function loadRecordingById(id: string): Promise<AutomationRecording> {
   const raw = await fs.readFile(filePath, "utf8");
   const recording = JSON.parse(raw) as AutomationRecording;
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
+  recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
   return recording;
 }
 
@@ -120,6 +127,7 @@ async function listRecordings(): Promise<AutomationRecording[]> {
       const raw = await fs.readFile(path.join(recordingsDir(), entry.name), "utf8");
       const recording = JSON.parse(raw) as AutomationRecording;
       recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
+      recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
       recordings.push(recording);
     } catch {
       // Keep loading the rest of the persistent library if one file is damaged.
@@ -497,6 +505,7 @@ app.whenReady().then(async () => {
       payload: {
         actions: AutomationAction[];
         executionSpeed?: ExecutionSpeed;
+        optimizationEnabled?: boolean;
       }
     ) => {
       if (!lastRecording) {
@@ -507,6 +516,9 @@ app.whenReady().then(async () => {
       lastRecording.executionSpeed = normalizeExecutionSpeed(
         payload.executionSpeed
       );
+      lastRecording.optimizationEnabled = normalizeOptimization(
+        payload.optimizationEnabled ?? lastRecording.optimizationEnabled
+      );
 
       await persistRecording(lastRecording);
       mainWindow?.webContents.send("recordings:changed");
@@ -514,6 +526,24 @@ app.whenReady().then(async () => {
       return {
         ok: true,
         recording: withVideoUrl(lastRecording),
+      };
+    }
+  );
+
+  ipcMain.handle(
+    "recording:update-optimization",
+    async (_event, enabled?: boolean) => {
+      if (!lastRecording) {
+        throw new Error("Nenhuma gravacao carregada.");
+      }
+
+      lastRecording.optimizationEnabled = normalizeOptimization(enabled);
+      await persistRecording(lastRecording);
+      mainWindow?.webContents.send("recordings:changed");
+
+      return {
+        ok: true,
+        optimizationEnabled: lastRecording.optimizationEnabled,
       };
     }
   );
