@@ -138,7 +138,6 @@ const notificationMarkRead = document.querySelector("#notification-mark-read");
 const swipeToastStack = document.querySelector("#swipe-toast-stack");
 
 const clickSparkCanvas = document.querySelector("#click-spark-canvas");
-const loginGradientBlinds = document.querySelector("#login-gradient-blinds");
 
 const recordingFinalizeLoader = document.querySelector("#recording-finalize-loader");
 const recordingLoaderLabel = document.querySelector("#recording-loader-label");
@@ -740,37 +739,6 @@ function initClickSpark() {
     }
 
     if (!frame) frame = requestAnimationFrame(draw);
-  });
-}
-
-function initLoginGradientBlinds() {
-  if (!loginGradientBlinds) return;
-
-  let targetX = 50;
-  let targetY = 50;
-  let currentX = 50;
-  let currentY = 50;
-  let frame = 0;
-
-  const update = () => {
-    currentX += (targetX - currentX) * 0.12;
-    currentY += (targetY - currentY) * 0.12;
-    loginGradientBlinds.style.setProperty("--gb-x", currentX.toFixed(2) + "%");
-    loginGradientBlinds.style.setProperty("--gb-y", currentY.toFixed(2) + "%");
-
-    const moving =
-      Math.abs(targetX - currentX) > 0.02 ||
-      Math.abs(targetY - currentY) > 0.02;
-
-    frame = moving ? requestAnimationFrame(update) : 0;
-  };
-
-  loginScreen.addEventListener("pointermove", (event) => {
-    const rect = loginScreen.getBoundingClientRect();
-    targetX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
-    targetY = ((event.clientY - rect.top) / Math.max(1, rect.height)) * 100;
-
-    if (!frame) frame = requestAnimationFrame(update);
   });
 }
 
@@ -3833,6 +3801,5 @@ initSpeedGauge(executionSpeedGauge, (speed) => {
 });
 
 initClickSpark();
-initLoginGradientBlinds();
 initMagicCards();
 initRubberSegment();

@@ -14,13 +14,6 @@
     <div id="swipe-toast-stack" class="swipe-toast-stack" aria-live="polite" aria-atomic="false"></div>
 
     <section id="login-screen" class="login-screen">
-      <div id="login-gradient-blinds" class="login-gradient-blinds" aria-hidden="true">
-        <div class="login-gradient-blinds__gradient"></div>
-        <div class="login-gradient-blinds__stripes"></div>
-        <div class="login-gradient-blinds__spotlight"></div>
-        <div class="login-gradient-blinds__noise"></div>
-      </div>
-
       <form id="login-form" class="login-card liquid-glass">
         <div class="login-copy">
           <h1>Bem-vindo.</h1>
@@ -182,16 +175,12 @@
               </div>
             </div>
 
-            <form id="editor-automation-search" class="curved-search" role="search">
-              <svg class="curved-search__shape" viewBox="0 0 640 66" preserveAspectRatio="none" aria-hidden="true">
-                <path class="curved-search__ring" d="M18 26 Q320 3 622 26 Q628 27 628 34 L628 46 Q628 52 621 53 Q320 33 19 53 Q12 52 12 46 L12 34 Q12 27 18 26 Z"></path>
-                <path class="curved-search__surface" d="M18 26 Q320 3 622 26 Q628 27 628 34 L628 46 Q628 52 621 53 Q320 33 19 53 Q12 52 12 46 L12 34 Q12 27 18 26 Z"></path>
-              </svg>
-              <span class="curved-search__icon" aria-hidden="true">
+            <form id="editor-automation-search" class="automation-search" role="search">
+              <span class="automation-search__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"></circle><path d="m15 15 5 5"></path></svg>
               </span>
               <input id="editor-automation-search-input" type="search" placeholder="Buscar automações, tags ou domínio..." autocomplete="off" spellcheck="false" aria-label="Buscar automações" />
-              <button id="editor-automation-search-clear" class="curved-search__clear is-hidden" type="button" aria-label="Limpar busca">×</button>
+              <button id="editor-automation-search-clear" class="automation-search__clear is-hidden" type="button" aria-label="Limpar busca">×</button>
             </form>
 
             <section class="folder-zone">

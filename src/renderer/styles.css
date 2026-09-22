@@ -4387,157 +4387,51 @@ body.logged-in .background-tint {
   user-select: none;
 }
 
-/* GradientBlinds adapted to the current vanilla Electron renderer. */
-.login-gradient-blinds {
-  --gb-x: 50%;
-  --gb-y: 50%;
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  isolation: isolate;
-}
-
-.login-gradient-blinds > div {
-  position: absolute;
-  inset: -4%;
-}
-
-.login-gradient-blinds__gradient {
-  background:
-    linear-gradient(
-      90deg,
-      rgba(62, 138, 255, 0.25) 0%,
-      rgba(70, 96, 245, 0.12) 28%,
-      rgba(93, 39, 255, 0.26) 58%,
-      rgba(85, 175, 255, 0.18) 100%
-    );
-  background-size: 170% 100%;
-  mix-blend-mode: screen;
-  opacity: 0.92;
-  animation: login-gradient-drift 12s ease-in-out infinite alternate;
-}
-
-.login-gradient-blinds__stripes {
-  background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(255,255,255,0.20) 0 2.5%,
-      rgba(31, 42, 86, 0.13) 2.5% 5%,
-      rgba(255,255,255,0.04) 5% 7.5%,
-      rgba(19, 31, 78, 0.18) 7.5% 10%
-    );
-  mix-blend-mode: overlay;
-  opacity: 0.72;
-  transform: skewX(-2deg) scale(1.04);
-}
-
-.login-gradient-blinds__spotlight {
-  background:
-    radial-gradient(
-      circle at var(--gb-x) var(--gb-y),
-      rgba(255,255,255,0.68) 0,
-      rgba(98, 161, 255,0.36) 14%,
-      rgba(87, 77, 255,0.13) 31%,
-      transparent 54%
-    );
-  mix-blend-mode: screen;
-  opacity: 0.86;
-}
-
-.login-gradient-blinds__noise {
-  opacity: 0.16;
-  mix-blend-mode: soft-light;
-  background-image:
-    repeating-radial-gradient(
-      circle at 23% 18%,
-      rgba(255,255,255,0.55) 0 0.7px,
-      rgba(24,32,70,0.22) 0.7px 1.4px,
-      transparent 1.4px 3px
-    );
-  background-size: 5px 5px;
-}
-
-.login-card {
-  position: relative;
-  z-index: 2;
-}
-
+/* Login keeps the original image/tint background. */
 .login-card .login-copy h1 {
   margin-top: 0;
 }
 
-@keyframes login-gradient-drift {
-  from {
-    background-position: 0% 50%;
-    transform: translate3d(-1.5%, 0, 0) scale(1.04);
-  }
-
-  to {
-    background-position: 100% 50%;
-    transform: translate3d(1.5%, 0, 0) scale(1.04);
-  }
-}
-
-/* CurvedInput-inspired search bar for the editor library. */
-.curved-search {
+/* Straight search bar for the editor library. */
+.automation-search {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
   width: min(640px, 100%);
-  height: 66px;
-  margin: 2px 0 10px;
-  outline: none;
+  height: 42px;
+  margin: 2px 0 12px;
+  border: 1px solid #d8dbe8;
+  border-radius: 11px;
+  background: rgba(255,255,255,0.96);
+  box-shadow: 0 7px 18px rgba(11, 14, 42, 0.06);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
 }
 
-.curved-search__shape {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 66px;
-  overflow: visible;
-  filter: drop-shadow(0 9px 18px rgba(11, 14, 42, 0.09));
-  pointer-events: none;
+.automation-search:focus-within,
+.automation-search.is-active {
+  border-color: #7d97ef;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 3px rgba(76, 125, 255, 0.09),
+    0 7px 18px rgba(11, 14, 42, 0.06);
 }
 
-.curved-search__surface {
-  fill: rgba(255,255,255,0.97);
-  stroke: #333c73;
-  stroke-width: 1.35;
-  vector-effect: non-scaling-stroke;
-}
-
-.curved-search__ring {
-  fill: none;
-  stroke: #4c7dff;
-  stroke-width: 7;
-  opacity: 0;
-  vector-effect: non-scaling-stroke;
-  transition: opacity 180ms ease;
-}
-
-.curved-search:focus-within .curved-search__ring,
-.curved-search.is-active .curved-search__ring {
-  opacity: 0.19;
-}
-
-.curved-search__icon {
-  position: absolute;
-  z-index: 2;
-  top: 24px;
-  left: 27px;
+.automation-search__icon {
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  color: #4a67d8;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 100%;
+  color: #5873da;
   pointer-events: none;
 }
 
-.curved-search__icon svg {
-  width: 17px;
-  height: 17px;
+.automation-search__icon svg {
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -4545,44 +4439,38 @@ body.logged-in .background-tint {
   stroke-linejoin: round;
 }
 
-.curved-search input {
-  position: absolute;
-  z-index: 2;
-  top: 18px;
-  right: 45px;
-  left: 55px;
-  height: 31px;
+.automation-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
   border: 0;
-  padding: 0 2px;
+  padding: 0 8px 0 0;
   color: #222a58;
   background: transparent;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
-  line-height: 31px;
   outline: none;
 }
 
-.curved-search input::placeholder {
+.automation-search input::placeholder {
   color: #989fb8;
   font-weight: 520;
 }
 
-.curved-search input::-webkit-search-cancel-button {
+.automation-search input::-webkit-search-cancel-button {
   display: none;
 }
 
-.curved-search__clear {
-  position: absolute;
-  z-index: 3;
-  top: 21px;
-  right: 25px;
+.automation-search__clear {
   display: grid;
   place-items: center;
-  width: 23px;
-  height: 23px;
+  flex: 0 0 auto;
+  width: 25px;
+  height: 25px;
+  margin-right: 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   padding: 0;
   color: #6f7393;
   background: rgba(77, 100, 203, 0.08);
@@ -4595,12 +4483,12 @@ body.logged-in .background-tint {
     transform 150ms ease;
 }
 
-.curved-search__clear:hover {
+.automation-search__clear:hover {
   color: #3c55bd;
   background: rgba(77, 100, 203, 0.14);
 }
 
-.curved-search__clear:active {
+.automation-search__clear:active {
   transform: scale(0.94);
 }
 
@@ -4817,16 +4705,12 @@ body.logged-in .background-tint {
     width: calc(100vw - 32px);
   }
 
-  .curved-search {
+  .automation-search {
     width: 100%;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .login-gradient-blinds__gradient {
-    animation: none;
-  }
-
   .swipe-toast__lift {
     transform: none !important;
     transition: opacity 180ms ease;
