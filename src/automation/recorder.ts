@@ -157,7 +157,9 @@ export class BrowserRecorder {
     await this.context.addInitScript({
       content: `
 (() => {
-  window.__autoFutureRecorderReady = true;
+  if (window.__autoFutureRecorderInstalled) return;
+  window.__autoFutureRecorderInstalled = true;
+  window.__autoFutureRecorderReady = false;
 
   const eventTarget = (event) => {
     const path = typeof event.composedPath === "function" ? event.composedPath() : [];
@@ -259,19 +261,24 @@ export class BrowserRecorder {
     send({ type: "navigate" });
   };
 
-  const originalPushState = history.pushState.bind(history);
-  history.pushState = (...args) => {
-    const result = originalPushState(...args);
-    queueMicrotask(reportNavigationIfChanged);
-    return result;
-  };
+  try {
+    const originalPushState = history.pushState.bind(history);
+    history.pushState = (...args) => {
+      const result = originalPushState(...args);
+      queueMicrotask(reportNavigationIfChanged);
+      return result;
+    };
 
-  const originalReplaceState = history.replaceState.bind(history);
-  history.replaceState = (...args) => {
-    const result = originalReplaceState(...args);
-    queueMicrotask(reportNavigationIfChanged);
-    return result;
-  };
+    const originalReplaceState = history.replaceState.bind(history);
+    history.replaceState = (...args) => {
+      const result = originalReplaceState(...args);
+      queueMicrotask(reportNavigationIfChanged);
+      return result;
+    };
+  } catch {
+    // Some pages lock down History API methods. Click/input capture must
+    // continue even when SPA navigation hooks cannot be patched.
+  }
 
   window.addEventListener("popstate", reportNavigationIfChanged, true);
   window.addEventListener("hashchange", reportNavigationIfChanged, true);
@@ -281,7 +288,7 @@ export class BrowserRecorder {
     window.clearInterval(navigationPoll);
   }, { once: true });
 
-  document.addEventListener("click", (event) => {
+  window.addEventListener("click", (event) => {
     const target = eventTarget(event);
     if (!target) return;
 
@@ -334,6 +341,8 @@ export class BrowserRecorder {
   document.addEventListener("focusout", (event) => {
     reportInput(eventTarget(event));
   }, true);
+
+  window.__autoFutureRecorderReady = true;
 })();
 `,
     });

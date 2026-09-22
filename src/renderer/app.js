@@ -34,6 +34,13 @@ const unsupportedPageDescription = document.querySelector("#unsupported-page-des
 const unsupportedPageUrl = document.querySelector("#unsupported-page-url");
 const unsupportedPageDetails = document.querySelector("#unsupported-page-details");
 const unsupportedPageClose = document.querySelector("#unsupported-page-close");
+const confirmModal = document.querySelector("#confirm-modal");
+const confirmModalEyebrow = document.querySelector("#confirm-modal-eyebrow");
+const confirmModalTitle = document.querySelector("#confirm-modal-title");
+const confirmModalDescription = document.querySelector("#confirm-modal-description");
+const confirmModalNote = document.querySelector("#confirm-modal-note");
+const confirmModalCancel = document.querySelector("#confirm-modal-cancel");
+const confirmModalConfirm = document.querySelector("#confirm-modal-confirm");
 
 const scheduleMap = document.querySelector("#schedule-map");
 const scheduleList = document.querySelector("#schedule-list");
@@ -128,6 +135,7 @@ let savedSchedules = [];
 let currentScheduleId = null;
 let currentVideoPageId = null;
 let pendingVideoSeekSeconds = 0;
+let pendingConfirmAction = null;
 let rubberActiveIndex = 0;
 let rubberDrag = null;
 let suppressRubberClick = false;
@@ -168,6 +176,33 @@ const SCHEDULE_HOURS = Array.from(
 function setStatus(text, kind = "idle") {
   statusText.textContent = text;
   status.className = "status " + kind;
+}
+
+function closeConfirmModal() {
+  confirmModal.classList.add("is-hidden");
+  confirmModalConfirm.disabled = false;
+  confirmModalCancel.disabled = false;
+  confirmModalConfirm.textContent = "Confirmar";
+  pendingConfirmAction = null;
+}
+
+function openConfirmModal({
+  eyebrow = "CONFIRMAÇÃO",
+  title = "Confirmar ação",
+  description = "",
+  note = "",
+  confirmLabel = "Confirmar",
+  onConfirm,
+}) {
+  pendingConfirmAction = onConfirm;
+  confirmModalEyebrow.textContent = eyebrow;
+  confirmModalTitle.textContent = title;
+  confirmModalDescription.textContent = description;
+  confirmModalNote.textContent = note;
+  confirmModalNote.classList.toggle("is-hidden", !note);
+  confirmModalConfirm.textContent = confirmLabel;
+  confirmModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => confirmModalConfirm.focus());
 }
 
 function setSidebarCollapsed(collapsed) {
@@ -408,35 +443,40 @@ function renderAutomationCard(recording) {
 
   card
     .querySelector(".automation-delete-button")
-    .addEventListener("click", async () => {
-      const confirmed = window.confirm(
-        'Excluir a automação "' + (recording.name || "Automação") +
-        '"? Os agendamentos vinculados a ela também serão removidos.'
-      );
+    .addEventListener("click", () => {
+      openConfirmModal({
+        eyebrow: "EXCLUIR AUTOMAÇÃO",
+        title: 'Excluir "' + (recording.name || "Automação") + '"?',
+        description:
+          "Essa automação será removida da sua biblioteca e não poderá mais ser executada.",
+        note:
+          scheduleTotal > 0
+            ? scheduleTotal + " agendamento" + (scheduleTotal === 1 ? "" : "s") +
+              " vinculado" + (scheduleTotal === 1 ? "" : "s") +
+              " também " + (scheduleTotal === 1 ? "será removido." : "serão removidos.")
+            : "Os arquivos de gravação ligados a essa automação também serão removidos.",
+        confirmLabel: "Excluir automação",
+        onConfirm: async () => {
+          setStatus("Excluindo automação", "working");
+          await ipcRenderer.invoke("recording:delete", recording.id);
 
-      if (!confirmed) return;
+          if (currentRecording?.id === recording.id) {
+            currentRecording = null;
+            selectedActionId = null;
+          }
 
-      try {
-        setStatus("Excluindo automação", "working");
-        await ipcRenderer.invoke("recording:delete", recording.id);
+          await Promise.all([refreshRecordings(), refreshSchedules()]);
 
-        if (currentRecording?.id === recording.id) {
-          currentRecording = null;
-          selectedActionId = null;
-        }
+          const activePage =
+            document.querySelector("[data-page-view].active")?.dataset.pageView;
 
-        await Promise.all([refreshRecordings(), refreshSchedules()]);
+          if (activePage === "editor") {
+            showEditorLibrary();
+          }
 
-        const activePage = document.querySelector("[data-page-view].active")?.dataset.pageView;
-        if (activePage === "editor") {
-          showEditorLibrary();
-        }
-
-        setStatus("Automação excluída", "success");
-      } catch (error) {
-        setStatus("Erro ao excluir", "error");
-        alert(error?.message || String(error));
-      }
+          setStatus("Automação excluída", "success");
+        },
+      });
     });
 
   return card;
@@ -1894,6 +1934,38 @@ unsupportedPageClose.addEventListener("click", () => {
   unsupportedPageModal.classList.add("is-hidden");
 });
 
+confirmModalCancel.addEventListener("click", closeConfirmModal);
+
+confirmModal.addEventListener("click", (event) => {
+  if (event.target === confirmModal) {
+    closeConfirmModal();
+  }
+});
+
+confirmModalConfirm.addEventListener("click", async () => {
+  if (typeof pendingConfirmAction !== "function") {
+    closeConfirmModal();
+    return;
+  }
+
+  const action = pendingConfirmAction;
+  confirmModalConfirm.disabled = true;
+  confirmModalCancel.disabled = true;
+  confirmModalConfirm.textContent = "Excluindo...";
+
+  try {
+    await action();
+    closeConfirmModal();
+  } catch (error) {
+    confirmModalNote.textContent = error?.message || String(error);
+    confirmModalNote.classList.remove("is-hidden");
+    confirmModalConfirm.disabled = false;
+    confirmModalCancel.disabled = false;
+    confirmModalConfirm.textContent = "Tentar novamente";
+    setStatus("Erro ao excluir", "error");
+  }
+});
+
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -2099,6 +2171,11 @@ browserSetupModal.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+
+  if (!confirmModal.classList.contains("is-hidden")) {
+    closeConfirmModal();
+    return;
+  }
 
   if (!scheduleModal.classList.contains("is-hidden")) {
     closeScheduleModal();
@@ -2373,21 +2450,29 @@ scheduleSaveButton.addEventListener("click", async () => {
   }
 });
 
-scheduleDeleteButton.addEventListener("click", async () => {
+scheduleDeleteButton.addEventListener("click", () => {
   if (!currentScheduleId) return;
 
-  const confirmed = window.confirm("Excluir este agendamento?");
-  if (!confirmed) return;
+  const schedule = savedSchedules.find(
+    (item) => item.id === currentScheduleId
+  );
 
-  try {
-    await ipcRenderer.invoke("schedule:delete", currentScheduleId);
-    closeScheduleModal();
-    await refreshSchedules();
-    setStatus("Agendamento excluído", "success");
-  } catch (error) {
-    setStatus("Erro ao excluir", "error");
-    alert(error?.message || String(error));
-  }
+  openConfirmModal({
+    eyebrow: "EXCLUIR AGENDAMENTO",
+    title: "Excluir este agendamento?",
+    description:
+      "A automação continuará salva, mas deixará de ser executada automaticamente nesse horário.",
+    note: schedule?.repeat
+      ? "A repetição semanal configurada também será removida."
+      : "Essa execução agendada será removida.",
+    confirmLabel: "Excluir agendamento",
+    onConfirm: async () => {
+      await ipcRenderer.invoke("schedule:delete", currentScheduleId);
+      closeScheduleModal();
+      await refreshSchedules();
+      setStatus("Agendamento excluído", "success");
+    },
+  });
 });
 
 scheduleModal.addEventListener("click", (event) => {
