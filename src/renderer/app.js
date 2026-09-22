@@ -24,6 +24,11 @@ const eventCountElement = document.querySelector("#event-count");
 const recordingWarningModal = document.querySelector("#recording-warning-modal");
 const recordWarningCancel = document.querySelector("#record-warning-cancel");
 const recordWarningContinue = document.querySelector("#record-warning-continue");
+const browserSetupModal = document.querySelector("#browser-setup-modal");
+const browserSetupDescription = document.querySelector("#browser-setup-description");
+const browserSetupCancel = document.querySelector("#browser-setup-cancel");
+const browserSetupOpen = document.querySelector("#browser-setup-open");
+const browserSetupDone = document.querySelector("#browser-setup-done");
 
 const editorEmpty = document.querySelector("#editor-empty");
 const editorWorkspace = document.querySelector("#editor-workspace");
@@ -864,14 +869,28 @@ function hideRecordingWarning() {
   recordingWarningModal.classList.add("is-hidden");
 }
 
-async function startRecording() {
+function showBrowserSetup(profile) {
+  hideRecordingWarning();
+  browserSetupDescription.textContent =
+    "Vamos preparar um perfil persistente no " +
+    (profile?.browserName || "navegador") +
+    ". O login será feito em uma janela normal, sem automação.";
+  browserSetupModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => browserSetupOpen.focus());
+}
+
+function hideBrowserSetup() {
+  browserSetupModal.classList.add("is-hidden");
+}
+
+async function startRecordingNow() {
   try {
     hideRecordingWarning();
+    hideBrowserSetup();
     resetEventList();
 
     recordButton.disabled = true;
     recordWarningContinue.disabled = true;
-    recordWarningContinue.textContent = "Abrindo navegador...";
     setStatus("Preparando navegador", "working");
 
     const result = await ipcRenderer.invoke("recording:start", {
@@ -881,12 +900,7 @@ async function startRecording() {
 
     stopButton.disabled = false;
     const browserLabel = result.browserName || "navegador";
-    setStatus(
-      result.firstUse
-        ? "Gravando · " + browserLabel + " · primeiro uso"
-        : "Gravando · " + browserLabel,
-      "recording"
-    );
+    setStatus("Gravando · " + browserLabel, "recording");
   } catch (error) {
     recordButton.disabled = false;
     stopButton.disabled = true;
@@ -898,9 +912,69 @@ async function startRecording() {
   }
 }
 
+async function continueFromRecordingWarning() {
+  recordWarningContinue.disabled = true;
+  recordWarningContinue.textContent = "Verificando sessão...";
+
+  try {
+    const profile = await ipcRenderer.invoke("browser:profile-status");
+
+    if (!profile.ready) {
+      showBrowserSetup(profile);
+      return;
+    }
+
+    await startRecordingNow();
+  } catch (error) {
+    setStatus("Erro", "error");
+    alert(error?.message || String(error));
+  } finally {
+    recordWarningContinue.disabled = false;
+    recordWarningContinue.textContent = "Entendi, começar";
+  }
+}
+
 recordButton.addEventListener("click", showRecordingWarning);
 recordWarningCancel.addEventListener("click", hideRecordingWarning);
-recordWarningContinue.addEventListener("click", startRecording);
+recordWarningContinue.addEventListener("click", continueFromRecordingWarning);
+
+browserSetupCancel.addEventListener("click", hideBrowserSetup);
+
+browserSetupOpen.addEventListener("click", async () => {
+  browserSetupOpen.disabled = true;
+  browserSetupOpen.textContent = "Abrindo...";
+
+  try {
+    const profile = await ipcRenderer.invoke("browser:setup-profile");
+    browserSetupDescription.textContent =
+      "O " + profile.browserName +
+      " foi aberto em modo normal. Faça login, feche essa janela do navegador e depois clique em “Já fiz login e fechei”.";
+  } catch (error) {
+    alert(error?.message || String(error));
+  } finally {
+    browserSetupOpen.disabled = false;
+    browserSetupOpen.textContent = "Abrir navegador";
+  }
+});
+
+browserSetupDone.addEventListener("click", async () => {
+  browserSetupDone.disabled = true;
+  browserSetupDone.textContent = "Verificando...";
+
+  try {
+    await ipcRenderer.invoke("browser:complete-profile-setup");
+    await startRecordingNow();
+  } catch (error) {
+    setStatus("Erro", "error");
+    alert(
+      (error?.message || String(error)) +
+      "\n\nConfirme que fechou a janela de configuração do navegador antes de continuar."
+    );
+  } finally {
+    browserSetupDone.disabled = false;
+    browserSetupDone.textContent = "Já fiz login e fechei";
+  }
+});
 
 recordingWarningModal.addEventListener("click", (event) => {
   if (event.target === recordingWarningModal) {
@@ -908,8 +982,21 @@ recordingWarningModal.addEventListener("click", (event) => {
   }
 });
 
+browserSetupModal.addEventListener("click", (event) => {
+  if (event.target === browserSetupModal) {
+    hideBrowserSetup();
+  }
+});
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !recordingWarningModal.classList.contains("is-hidden")) {
+  if (event.key !== "Escape") return;
+
+  if (!browserSetupModal.classList.contains("is-hidden")) {
+    hideBrowserSetup();
+    return;
+  }
+
+  if (!recordingWarningModal.classList.contains("is-hidden")) {
     hideRecordingWarning();
   }
 });

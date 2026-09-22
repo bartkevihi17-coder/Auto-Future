@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const READY_MARKER = ".autofuture-profile-ready";
 
 type BrowserKind = "chrome" | "edge" | "brave" | "opera";
 
@@ -14,6 +16,12 @@ export interface PreparedBrowserProfile {
   executablePath?: string;
   importedFromExisting: boolean;
   firstUse: boolean;
+}
+
+export interface BrowserProfileStatus {
+  browserName: string;
+  userDataDir: string;
+  ready: boolean;
 }
 
 interface BrowserSource {
@@ -109,11 +117,14 @@ async function detectBrowserSource(): Promise<BrowserSource | null> {
   if (process.platform !== "win32") return null;
 
   const localAppData = process.env.LOCALAPPDATA;
+  const programFiles = process.env.PROGRAMFILES;
+  const programFilesX86 = process.env["PROGRAMFILES(X86)"];
+
   if (!localAppData) return null;
 
   const detected = await detectDefaultBrowserExecutable();
-  const executablePath = detected.executablePath;
-  const exeLower = executablePath?.toLowerCase() ?? "";
+  const detectedExe = detected.executablePath;
+  const exeLower = detectedExe?.toLowerCase() ?? "";
   const progLower = detected.progId?.toLowerCase() ?? "";
 
   if (exeLower.includes("opera") || progLower.includes("opera")) {
@@ -123,26 +134,26 @@ async function detectBrowserSource(): Promise<BrowserSource | null> {
       progLower.includes("operagx") ||
       progLower.includes("opera gx");
 
-    const resolvedExe = await firstExisting([
-      executablePath,
+    const executablePath = await firstExisting([
+      detectedExe,
       isGx
         ? path.join(localAppData, "Programs", "Opera GX", "opera.exe")
         : undefined,
       path.join(localAppData, "Programs", "Opera", "opera.exe"),
     ]);
 
-    if (resolvedExe) {
+    if (executablePath) {
       return {
         kind: "opera",
         browserName: isGx ? "Opera GX" : "Opera",
-        executablePath: resolvedExe,
+        executablePath,
       };
     }
   }
 
   if (exeLower.includes("brave") || progLower.includes("brave")) {
-    const resolvedExe = await firstExisting([
-      executablePath,
+    const executablePath = await firstExisting([
+      detectedExe,
       path.join(
         localAppData,
         "BraveSoftware",
@@ -150,39 +161,71 @@ async function detectBrowserSource(): Promise<BrowserSource | null> {
         "Application",
         "brave.exe"
       ),
+      programFiles
+        ? path.join(
+            programFiles,
+            "BraveSoftware",
+            "Brave-Browser",
+            "Application",
+            "brave.exe"
+          )
+        : undefined,
     ]);
 
-    if (resolvedExe) {
+    if (executablePath) {
       return {
         kind: "brave",
         browserName: "Brave",
-        executablePath: resolvedExe,
+        executablePath,
       };
     }
   }
 
   if (exeLower.includes("msedge") || progLower.includes("msedge")) {
+    const executablePath = await firstExisting([
+      detectedExe,
+      programFilesX86
+        ? path.join(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe")
+        : undefined,
+      programFiles
+        ? path.join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe")
+        : undefined,
+    ]);
+
     return {
       kind: "edge",
       browserName: "Microsoft Edge",
       channel: "msedge",
+      executablePath,
     };
   }
 
   if (exeLower.includes("chrome") || progLower.includes("chrome")) {
+    const executablePath = await firstExisting([
+      detectedExe,
+      path.join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
+      programFiles
+        ? path.join(programFiles, "Google", "Chrome", "Application", "chrome.exe")
+        : undefined,
+      programFilesX86
+        ? path.join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe")
+        : undefined,
+    ]);
+
     return {
       kind: "chrome",
       browserName: "Google Chrome",
       channel: "chrome",
+      executablePath,
     };
   }
 
   return null;
 }
 
-export async function prepareBrowserProfile(
+async function resolveManagedProfile(
   managedRootDir: string
-): Promise<PreparedBrowserProfile> {
+): Promise<{ source: BrowserSource; userDataDir: string; ready: boolean }> {
   const source = await detectBrowserSource();
 
   if (!source) {
@@ -192,17 +235,94 @@ export async function prepareBrowserProfile(
     );
   }
 
-  const managedUserDataDir = path.join(managedRootDir, source.kind);
-  const firstUse = !(await exists(path.join(managedUserDataDir, "Local State")));
+  const userDataDir = path.join(managedRootDir, source.kind);
+  await fs.mkdir(userDataDir, { recursive: true });
 
-  await fs.mkdir(managedUserDataDir, { recursive: true });
+  return {
+    source,
+    userDataDir,
+    ready: await exists(path.join(userDataDir, READY_MARKER)),
+  };
+}
+
+export async function getBrowserProfileStatus(
+  managedRootDir: string
+): Promise<BrowserProfileStatus> {
+  const { source, userDataDir, ready } = await resolveManagedProfile(managedRootDir);
 
   return {
     browserName: source.browserName,
-    userDataDir: managedUserDataDir,
+    userDataDir,
+    ready,
+  };
+}
+
+export async function launchBrowserProfileSetup(
+  managedRootDir: string
+): Promise<BrowserProfileStatus> {
+  const { source, userDataDir, ready } = await resolveManagedProfile(managedRootDir);
+
+  if (!source.executablePath) {
+    throw new Error(
+      "Encontrei " + source.browserName +
+      ", mas nao consegui localizar o executavel para abrir a configuracao da sessao."
+    );
+  }
+
+  const child = spawn(
+    source.executablePath,
+    [
+      "--user-data-dir=" + userDataDir,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--new-window",
+      "https://accounts.google.com/",
+    ],
+    {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    }
+  );
+
+  child.unref();
+
+  return {
+    browserName: source.browserName,
+    userDataDir,
+    ready,
+  };
+}
+
+export async function markBrowserProfileReady(
+  managedRootDir: string
+): Promise<BrowserProfileStatus> {
+  const { source, userDataDir } = await resolveManagedProfile(managedRootDir);
+
+  await fs.writeFile(
+    path.join(userDataDir, READY_MARKER),
+    new Date().toISOString(),
+    "utf8"
+  );
+
+  return {
+    browserName: source.browserName,
+    userDataDir,
+    ready: true,
+  };
+}
+
+export async function prepareBrowserProfile(
+  managedRootDir: string
+): Promise<PreparedBrowserProfile> {
+  const { source, userDataDir, ready } = await resolveManagedProfile(managedRootDir);
+
+  return {
+    browserName: source.browserName,
+    userDataDir,
     channel: source.channel,
     executablePath: source.executablePath,
     importedFromExisting: false,
-    firstUse,
+    firstUse: !ready,
   };
 }

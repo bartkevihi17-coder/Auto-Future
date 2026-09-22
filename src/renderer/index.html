@@ -439,6 +439,45 @@
       </div>
     </div>
 
+    <div id="browser-setup-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="browser-setup-title">
+      <div class="modal-card browser-setup-card">
+        <div class="modal-icon">◎</div>
+
+        <div class="modal-copy">
+          <p class="eyebrow">PRIMEIRA CONFIGURAÇÃO</p>
+          <h3 id="browser-setup-title">Entre na sua conta uma vez</h3>
+          <p id="browser-setup-description">
+            Para evitar o bloqueio do Google, o primeiro login precisa ser feito fora da automação.
+          </p>
+
+          <div class="setup-steps">
+            <div class="setup-step">
+              <span>1</span>
+              <p>Abra o navegador de configuração pelo botão abaixo.</p>
+            </div>
+            <div class="setup-step">
+              <span>2</span>
+              <p>Faça login normalmente nas contas que quiser usar.</p>
+            </div>
+            <div class="setup-step">
+              <span>3</span>
+              <p>Feche essa janela do navegador e volte para o Auto Future.</p>
+            </div>
+          </div>
+
+          <p class="modal-note">
+            Esse perfil é exclusivo do Auto Future. Depois dessa etapa, sua sessão será reutilizada nas gravações e execuções.
+          </p>
+        </div>
+
+        <div class="modal-actions modal-actions--setup">
+          <button id="browser-setup-cancel" class="button" type="button">Cancelar</button>
+          <button id="browser-setup-open" class="button" type="button">Abrir navegador</button>
+          <button id="browser-setup-done" class="button primary" type="button">Já fiz login e fechei</button>
+        </div>
+      </div>
+    </div>
+
     <div id="view-loading" class="view-loading">
       <div class="loader">
         <span></span><span></span><span></span>

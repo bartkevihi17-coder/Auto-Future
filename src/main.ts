@@ -4,6 +4,11 @@ import fs from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { BrowserRecorder } from "./automation/recorder";
 import { runRecording } from "./automation/runner";
+import {
+  getBrowserProfileStatus,
+  launchBrowserProfileSetup,
+  markBrowserProfileReady,
+} from "./automation/browser-profile";
 import { AutomationAction, AutomationRecording } from "./shared/types";
 
 let mainWindow: BrowserWindow | null = null;
@@ -77,6 +82,18 @@ app.whenReady().then(async () => {
       await recorder.stop().catch(() => undefined);
     }
     return { ok: true };
+  });
+
+  ipcMain.handle("browser:profile-status", async () => {
+    return getBrowserProfileStatus(browserProfileDir());
+  });
+
+  ipcMain.handle("browser:setup-profile", async () => {
+    return launchBrowserProfileSetup(browserProfileDir());
+  });
+
+  ipcMain.handle("browser:complete-profile-setup", async () => {
+    return markBrowserProfileReady(browserProfileDir());
   });
 
   ipcMain.handle("recording:start", async (_event, payload: { url: string; name?: string }) => {

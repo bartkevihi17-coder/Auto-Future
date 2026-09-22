@@ -1998,3 +1998,60 @@ body.logged-in .background-tint {
     min-height: 300px;
   }
 }
+
+/* First-run browser session setup */
+.browser-setup-card {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.setup-steps {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 2px;
+}
+
+.setup-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #ece7f0;
+  border-radius: 11px;
+  padding: 9px 10px;
+  background: #fbfafc;
+}
+
+.setup-step > span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #dac7f1;
+  border-radius: 8px;
+  color: #6f2bc2;
+  background: #f5ecff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.setup-step p {
+  margin: 0;
+  color: #5d5665;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.modal-actions--setup {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 620px) {
+  .modal-actions--setup {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .modal-actions--setup .button {
+    width: 100%;
+  }
+}
