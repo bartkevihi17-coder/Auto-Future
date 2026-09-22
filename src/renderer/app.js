@@ -206,6 +206,7 @@ const aiAgentClose = document.querySelector("#ai-agent-close");
 const aiAgentName = document.querySelector("#ai-agent-name");
 const aiAgentObjective = document.querySelector("#ai-agent-objective");
 const aiAgentStatus = document.querySelector("#ai-agent-status");
+const aiAgentForceStop = document.querySelector("#ai-agent-force-stop");
 const aiAgentBrowser = document.querySelector("#ai-agent-browser");
 const aiBrowserBack = document.querySelector("#ai-browser-back");
 const aiBrowserForward = document.querySelector("#ai-browser-forward");
@@ -1995,6 +1996,128 @@ function describeAiProposal(proposal) {
     : "Ação no navegador";
 }
 
+function aiTargetSemanticText(target) {
+  if (!target) return "";
+
+  return [
+    target.ariaLabel,
+    target.text,
+    target.title,
+    target.placeholder,
+    target.role,
+  ]
+    .map((value) => normalizeSearchText(value || ""))
+    .filter(Boolean)
+    .join(" | ");
+}
+
+async function inspectAiTarget(targetId) {
+  if (!targetId) return null;
+
+  return aiAgentBrowser.executeJavaScript(
+    `(() => {
+      const targetId = ${JSON.stringify(targetId)};
+      const target = document.querySelector(
+        '[data-af-ai-id="' + CSS.escape(targetId) + '"]'
+      );
+
+      if (!target) return null;
+
+      const clean = (value, limit = 180) =>
+        String(value || "")
+          .replace(/\\s+/g, " ")
+          .trim()
+          .slice(0, limit);
+
+      const rect = target.getBoundingClientRect();
+      const style = getComputedStyle(target);
+      const visible =
+        rect.width > 2 &&
+        rect.height > 2 &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < innerHeight &&
+        rect.left < innerWidth &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || 1) > 0.02;
+
+      return {
+        id: targetId,
+        tag: target.tagName.toLowerCase(),
+        role: clean(target.getAttribute("role"), 60),
+        text:
+          target.tagName === "INPUT" || target.tagName === "TEXTAREA"
+            ? clean(
+                target.getAttribute("aria-label") ||
+                  target.getAttribute("placeholder"),
+                180
+              )
+            : clean(target.innerText || target.textContent, 180),
+        ariaLabel: clean(target.getAttribute("aria-label"), 180),
+        placeholder: clean(target.getAttribute("placeholder"), 180),
+        title: clean(target.getAttribute("title"), 180),
+        disabled: Boolean(
+          target.disabled || target.getAttribute("aria-disabled") === "true"
+        ),
+        visible,
+      };
+    })()`
+  );
+}
+
+function aiProposalTargetBecameStale(proposal, currentTarget) {
+  const original = proposal?._targetSnapshot;
+
+  if (!proposal?.targetId) {
+    return {
+      stale: false,
+      reason: "",
+    };
+  }
+
+  if (!currentTarget) {
+    return {
+      stale: true,
+      reason: "O elemento escolhido não existe mais no estado atual da página.",
+    };
+  }
+
+  if (!currentTarget.visible || currentTarget.disabled) {
+    return {
+      stale: true,
+      reason: "O elemento escolhido deixou de estar visível ou disponível.",
+    };
+  }
+
+  if (!original) {
+    return {
+      stale: false,
+      reason: "",
+    };
+  }
+
+  const before = aiTargetSemanticText(original);
+  const now = aiTargetSemanticText(currentTarget);
+
+  if (before && now && before !== now) {
+    return {
+      stale: true,
+      reason:
+        "O elemento mudou de significado antes da execução. Antes: “" +
+        before.slice(0, 180) +
+        "”. Agora: “" +
+        now.slice(0, 180) +
+        "”.",
+    };
+  }
+
+  return {
+    stale: false,
+    reason: "",
+  };
+}
+
 async function showAiTargetBubble(proposal) {
   if (!proposal?.targetId) return;
 
@@ -2123,7 +2246,7 @@ function pushAiAgentContextEvent(type, proposal = null, detail = {}) {
   }
 }
 
-async function requestAiAgentProposal(manualNote = "") {
+async function requestAiAgentProposal(manualNote = "", retryCount = 0) {
   if (!aiAgentAction || aiAgentManualMode) return;
 
   const requestId = ++aiAgentRequestSerial;
@@ -2152,6 +2275,11 @@ async function requestAiAgentProposal(manualNote = "") {
       throw new Error("A IA não retornou uma próxima ação.");
     }
 
+    if (proposal.targetId && Array.isArray(snapshot?.elements)) {
+      proposal._targetSnapshot =
+        snapshot.elements.find((element) => element.id === proposal.targetId) || null;
+    }
+
     aiAgentProposalState = proposal;
     aiAgentProposal.classList.remove("is-hidden");
     aiAgentProposalLabel.textContent =
@@ -2178,11 +2306,31 @@ async function requestAiAgentProposal(manualNote = "") {
   } catch (error) {
     if (requestId !== aiAgentRequestSerial) return;
 
+    const message = error?.message || String(error);
+
+    if (retryCount < 1 && aiAgentAction && !aiAgentManualMode) {
+      pushAiAgentContextEvent("analysis-error", null, {
+        message,
+        retry: retryCount + 1,
+      });
+
+      setAiAgentStatus("A análise falhou · tentando novamente...", "working");
+      await waitAi(700);
+
+      if (requestId !== aiAgentRequestSerial || !aiAgentAction) return;
+
+      await requestAiAgentProposal(
+        "A tentativa anterior de analisar a página falhou. Reavalie o estado atual sem repetir uma etapa já concluída.",
+        retryCount + 1
+      );
+      return;
+    }
+
     aiAgentProposalState = null;
     setAiAgentStatus("Não consegui escolher a próxima ação", "error");
     aiAgentProposal.classList.remove("is-hidden");
     aiAgentProposalLabel.textContent = "A IA encontrou um problema";
-    aiAgentProposalDetail.textContent = error?.message || String(error);
+    aiAgentProposalDetail.textContent = message;
     setAiProposalButtonsVisible(false);
     aiAgentManual.classList.remove("is-hidden");
   }
@@ -2446,6 +2594,8 @@ async function executeAiAgentProposal() {
 
   if (!proposal || !aiAgentAction) return;
 
+  const executionActionId = aiAgentAction.id;
+
   if (proposal.status === "done") {
     setAiAgentStatus("Execução finalizada", "success");
     aiAgentProposal.classList.add("is-hidden");
@@ -2462,6 +2612,43 @@ async function executeAiAgentProposal() {
   let undoEntry = null;
 
   try {
+    if (
+      proposal.targetId &&
+      (proposal.action === "click" ||
+        proposal.action === "input" ||
+        proposal.action === "key")
+    ) {
+      const currentTarget = await inspectAiTarget(proposal.targetId);
+      const freshness = aiProposalTargetBecameStale(proposal, currentTarget);
+
+      if (freshness.stale) {
+        pushAiAgentContextEvent("stale", proposal, {
+          reason: freshness.reason,
+          currentTarget,
+        });
+
+        aiAgentRejected.push({
+          ...compactAiProposal(proposal),
+          reason: "stale-target",
+        });
+
+        aiAgentProposalState = null;
+        aiAgentProposal.classList.add("is-hidden");
+        setAiAgentStatus("A página mudou · reavaliando...", "working");
+        await clearAiTargetBubble();
+        await waitAi(350);
+
+        if (!aiAgentAction) return;
+
+        await requestAiAgentProposal(
+          "A sugestão anterior ficou obsoleta porque a página mudou antes da execução. " +
+            freshness.reason +
+            " Não execute a ação antiga; continue do estado atual."
+        );
+        return;
+      }
+    }
+
     undoEntry = await captureAiUndoEntry(proposal);
     await clearAiTargetBubble();
 
@@ -2560,6 +2747,8 @@ async function executeAiAgentProposal() {
 
     await waitAi(550);
 
+    if (!aiAgentAction || aiAgentAction.id !== executionActionId) return;
+
     if (undoEntry) {
       await finalizeAiUndoEntry(undoEntry);
     }
@@ -2578,11 +2767,38 @@ async function executeAiAgentProposal() {
     await waitAi(350);
     await requestAiAgentProposal();
   } catch (error) {
-    setAiAgentStatus("A ação aprovada falhou", "error");
-    aiAgentProposal.classList.remove("is-hidden");
-    aiAgentProposalLabel.textContent = "Não consegui executar essa ação";
-    aiAgentProposalDetail.textContent = error?.message || String(error);
-    setAiProposalButtonsVisible(true);
+    if (!aiAgentAction) return;
+
+    const message = error?.message || String(error);
+
+    pushAiAgentContextEvent("failed", proposal, {
+      message,
+      resultingUrl:
+        aiAgentBrowser.getURL?.() ||
+        aiBrowserUrl.textContent ||
+        null,
+    });
+
+    aiAgentRejected.push({
+      ...compactAiProposal(proposal),
+      reason: "execution-failed",
+      error: message,
+    });
+
+    aiAgentProposalState = null;
+    aiAgentProposal.classList.add("is-hidden");
+    setAiAgentStatus("A ação falhou · recuperando...", "working");
+    await clearAiTargetBubble();
+    await waitAi(600);
+
+    if (!aiAgentAction) return;
+
+    await requestAiAgentProposal(
+      "A ação aprovada anterior falhou durante a execução: " +
+        message +
+        ". Não fique parado nesse erro e não repita cegamente a mesma ação. " +
+        "Leia o estado atual da página e proponha uma alternativa que continue rumo ao objetivo."
+    );
   } finally {
     aiAgentApprove.disabled = false;
     aiAgentReject.disabled = false;
@@ -2739,6 +2955,42 @@ async function startAiAgent(action) {
     setAiProposalButtonsVisible(false);
     aiAgentManual.classList.remove("is-hidden");
   }
+}
+
+function forceStopAiAgent() {
+  aiAgentRequestSerial += 1;
+  aiAgentRunning = false;
+  aiAgentManualMode = false;
+
+  try {
+    aiAgentBrowser.stop?.();
+  } catch {
+    // Force stop must never depend on the embedded page cooperating.
+  }
+
+  void clearAiTargetBubble();
+
+  aiAgentAction = null;
+  aiAgentProposalState = null;
+  aiAgentRejected = [];
+  aiAgentHistory = [];
+  aiAgentContextEvents = [];
+
+  aiAgentProposal.classList.add("is-hidden");
+  aiAgentManualBar.classList.add("is-hidden");
+  aiAgentBrowser.classList.remove("is-reviewing");
+  aiAgentWorkspace.classList.add("is-hidden");
+  aiAgentWorkspace.closest(".ai-shell")?.classList.remove("agent-active");
+  aiBrowserUrl.textContent = "about:blank";
+
+  try {
+    aiAgentBrowser.loadURL("about:blank");
+  } catch {
+    // The workspace is already detached from the active run.
+  }
+
+  syncAiUndoButton();
+  setStatus("Execução com IA encerrada à força", "success");
 }
 
 async function closeAiAgent() {
@@ -5068,6 +5320,8 @@ document.addEventListener("pointerdown", (event) => {
 aiAgentClose.addEventListener("click", () => {
   void closeAiAgent();
 });
+
+aiAgentForceStop.addEventListener("click", forceStopAiAgent);
 
 aiAgentUndo.addEventListener("click", () => {
   void undoAiAgentLastAction();

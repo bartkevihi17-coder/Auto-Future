@@ -6451,3 +6451,40 @@ body.logged-in .background-tint {
     flex-wrap: wrap;
   }
 }
+
+
+/* ===== AI emergency stop ===== */
+
+.ai-agent-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ai-agent-force-stop {
+  min-height: 29px;
+  border-color: #efc9d0;
+  color: #a13f52;
+  background: #fff5f7;
+  white-space: nowrap;
+}
+
+.ai-agent-force-stop:hover {
+  border-color: #e7aeba;
+  color: #b12e49;
+  background: #ffecef;
+}
+
+.ai-agent-force-stop:active {
+  transform: scale(0.97);
+}
+
+@media (max-width: 760px) {
+  .ai-agent-head-actions {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+}
