@@ -5055,3 +5055,42 @@ body.logged-in .background-tint {
 .automation-card__icon.has-image .automation-card__icon-fallback {
   display: none;
 }
+
+
+/* ===== Recording warning: optimization guidance ===== */
+.recording-optimization-warning {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  border: 1px solid #d9c8f4;
+  border-radius: 12px;
+  padding: 11px 12px;
+  color: #4d405a;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(122, 53, 216, 0.08),
+      rgba(76, 125, 255, 0.05)
+    );
+}
+
+.recording-optimization-warning strong {
+  color: #5f2aa9;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.recording-optimization-warning p {
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.recording-optimization-warning small {
+  display: block;
+  margin-top: 2px;
+  color: #7a6f85;
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1.45;
+}
