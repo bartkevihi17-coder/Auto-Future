@@ -10,17 +10,15 @@ type BrowserKind = "chrome" | "edge" | "brave" | "opera";
 export interface PreparedBrowserProfile {
   browserName: string;
   userDataDir: string;
-  profileDirectory?: string;
   channel?: "chrome" | "msedge";
   executablePath?: string;
   importedFromExisting: boolean;
+  firstUse: boolean;
 }
 
 interface BrowserSource {
   kind: BrowserKind;
   browserName: string;
-  userDataDir: string;
-  profileDirectory?: string;
   channel?: "chrome" | "msedge";
   executablePath?: string;
 }
@@ -65,6 +63,16 @@ function executableFromCommand(command: string | null): string | undefined {
   return plain?.[1];
 }
 
+async function firstExisting(
+  candidates: Array<string | undefined>
+): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    if (candidate && (await exists(candidate))) return candidate;
+  }
+
+  return undefined;
+}
+
 async function detectDefaultBrowserExecutable(): Promise<{
   progId?: string;
   executablePath?: string;
@@ -97,185 +105,104 @@ async function detectDefaultBrowserExecutable(): Promise<{
   }
 }
 
-async function lastUsedChromiumProfile(userDataDir: string): Promise<string> {
-  try {
-    const raw = await fs.readFile(path.join(userDataDir, "Local State"), "utf8");
-    const state = JSON.parse(raw) as {
-      profile?: {
-        last_used?: string;
-        last_active_profiles?: string[];
-      };
-    };
-
-    return (
-      state.profile?.last_used ||
-      state.profile?.last_active_profiles?.[0] ||
-      "Default"
-    );
-  } catch {
-    return "Default";
-  }
-}
-
-async function firstExisting(
-  candidates: Array<string | undefined>
-): Promise<string | undefined> {
-  for (const candidate of candidates) {
-    if (candidate && (await exists(candidate))) return candidate;
-  }
-
-  return undefined;
-}
-
 async function detectBrowserSource(): Promise<BrowserSource | null> {
   if (process.platform !== "win32") return null;
 
   const localAppData = process.env.LOCALAPPDATA;
-  const appData = process.env.APPDATA;
-
-  if (!localAppData || !appData) return null;
+  if (!localAppData) return null;
 
   const detected = await detectDefaultBrowserExecutable();
   const executablePath = detected.executablePath;
   const exeLower = executablePath?.toLowerCase() ?? "";
   const progLower = detected.progId?.toLowerCase() ?? "";
 
-  const opera =
-    exeLower.includes("opera") ||
-    progLower.includes("opera");
-
-  if (opera) {
+  if (exeLower.includes("opera") || progLower.includes("opera")) {
     const isGx =
       exeLower.includes("opera gx") ||
       exeLower.includes("opera_gx") ||
       progLower.includes("operagx") ||
       progLower.includes("opera gx");
 
-    const userDataDir = isGx
-      ? path.join(appData, "Opera Software", "Opera GX Stable")
-      : path.join(appData, "Opera Software", "Opera Stable");
+    const resolvedExe = await firstExisting([
+      executablePath,
+      isGx
+        ? path.join(localAppData, "Programs", "Opera GX", "opera.exe")
+        : undefined,
+      path.join(localAppData, "Programs", "Opera", "opera.exe"),
+    ]);
 
-    if (await exists(userDataDir)) {
+    if (resolvedExe) {
       return {
         kind: "opera",
         browserName: isGx ? "Opera GX" : "Opera",
-        userDataDir,
-        executablePath: await firstExisting([
-          executablePath,
-          isGx
-            ? path.join(localAppData, "Programs", "Opera GX", "opera.exe")
-            : undefined,
-          path.join(localAppData, "Programs", "Opera", "opera.exe"),
-        ]),
+        executablePath: resolvedExe,
       };
     }
   }
 
-  const brave =
-    exeLower.includes("brave") ||
-    progLower.includes("brave");
+  if (exeLower.includes("brave") || progLower.includes("brave")) {
+    const resolvedExe = await firstExisting([
+      executablePath,
+      path.join(
+        localAppData,
+        "BraveSoftware",
+        "Brave-Browser",
+        "Application",
+        "brave.exe"
+      ),
+    ]);
 
-  if (brave) {
-    const userDataDir = path.join(
-      localAppData,
-      "BraveSoftware",
-      "Brave-Browser",
-      "User Data"
-    );
-
-    if (await exists(userDataDir)) {
+    if (resolvedExe) {
       return {
         kind: "brave",
         browserName: "Brave",
-        userDataDir,
-        profileDirectory: await lastUsedChromiumProfile(userDataDir),
-        executablePath: await firstExisting([
-          executablePath,
-          path.join(
-            localAppData,
-            "BraveSoftware",
-            "Brave-Browser",
-            "Application",
-            "brave.exe"
-          ),
-        ]),
+        executablePath: resolvedExe,
       };
     }
   }
 
-  const edge =
-    exeLower.includes("msedge") ||
-    progLower.includes("msedge");
-
-  if (edge) {
-    const userDataDir = path.join(
-      localAppData,
-      "Microsoft",
-      "Edge",
-      "User Data"
-    );
-
-    if (await exists(userDataDir)) {
-      return {
-        kind: "edge",
-        browserName: "Microsoft Edge",
-        userDataDir,
-        profileDirectory: await lastUsedChromiumProfile(userDataDir),
-        channel: "msedge",
-      };
-    }
+  if (exeLower.includes("msedge") || progLower.includes("msedge")) {
+    return {
+      kind: "edge",
+      browserName: "Microsoft Edge",
+      channel: "msedge",
+    };
   }
 
-  const chrome =
-    exeLower.includes("chrome") ||
-    progLower.includes("chrome");
-
-  if (chrome) {
-    const userDataDir = path.join(
-      localAppData,
-      "Google",
-      "Chrome",
-      "User Data"
-    );
-
-    if (await exists(userDataDir)) {
-      return {
-        kind: "chrome",
-        browserName: "Google Chrome",
-        userDataDir,
-        profileDirectory: await lastUsedChromiumProfile(userDataDir),
-        channel: "chrome",
-      };
-    }
+  if (exeLower.includes("chrome") || progLower.includes("chrome")) {
+    return {
+      kind: "chrome",
+      browserName: "Google Chrome",
+      channel: "chrome",
+    };
   }
 
   return null;
 }
 
 export async function prepareBrowserProfile(
-  _managedFallbackDir: string
+  managedRootDir: string
 ): Promise<PreparedBrowserProfile> {
   const source = await detectBrowserSource();
 
   if (!source) {
     throw new Error(
-      "O navegador padrao do Windows nao e um navegador Chromium compativel ou nao foi localizado. " +
-      "Por enquanto o Auto Future suporta o perfil real do Opera/Opera GX, Chrome, Edge e Brave."
+      "O navegador padrao do Windows nao e um Chromium compativel ou nao foi localizado. " +
+      "Por enquanto o Auto Future suporta Opera/Opera GX, Chrome, Edge e Brave."
     );
   }
 
-  if (!source.executablePath && !source.channel) {
-    throw new Error(
-      "Encontrei o perfil do navegador padrao, mas nao consegui localizar o executavel dele."
-    );
-  }
+  const managedUserDataDir = path.join(managedRootDir, source.kind);
+  const firstUse = !(await exists(path.join(managedUserDataDir, "Local State")));
+
+  await fs.mkdir(managedUserDataDir, { recursive: true });
 
   return {
     browserName: source.browserName,
-    userDataDir: source.userDataDir,
-    profileDirectory: source.profileDirectory,
+    userDataDir: managedUserDataDir,
     channel: source.channel,
     executablePath: source.executablePath,
-    importedFromExisting: true,
+    importedFromExisting: false,
+    firstUse,
   };
 }

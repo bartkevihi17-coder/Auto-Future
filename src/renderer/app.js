@@ -880,7 +880,13 @@ async function startRecording() {
     });
 
     stopButton.disabled = false;
-    setStatus("Gravando · " + (result.browserName || "navegador"), "recording");
+    const browserLabel = result.browserName || "navegador";
+    setStatus(
+      result.firstUse
+        ? "Gravando · " + browserLabel + " · primeiro uso"
+        : "Gravando · " + browserLabel,
+      "recording"
+    );
   } catch (error) {
     recordButton.disabled = false;
     stopButton.disabled = true;

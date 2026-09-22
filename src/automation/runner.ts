@@ -25,10 +25,6 @@ export async function runRecording(
     "--disable-session-crashed-bubble",
   ];
 
-  if (preparedProfile.profileDirectory) {
-    launchArgs.push("--profile-directory=" + preparedProfile.profileDirectory);
-  }
-
   let context;
 
   try {
@@ -50,14 +46,14 @@ export async function runRecording(
       lower.includes("profile") && lower.includes("lock")
     ) {
       throw new Error(
-        "O " + preparedProfile.browserName +
-        " ja esta usando esse perfil. Feche todas as janelas do navegador padrao antes de executar a automacao."
+        "O perfil do Auto Future para " + preparedProfile.browserName +
+        " ja esta em uso. Feche a janela de navegador aberta pelo Auto Future antes de executar a automacao."
       );
     }
 
     throw new Error(
-      "Nao consegui abrir o navegador padrao (" + preparedProfile.browserName +
-      ") com o perfil real. " + message
+      "Nao consegui abrir " + preparedProfile.browserName +
+      " com o perfil persistente do Auto Future. " + message
     );
   }
 

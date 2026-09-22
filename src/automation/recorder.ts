@@ -13,6 +13,7 @@ export class BrowserRecorder {
   private recording: AutomationRecording | null = null;
   private lastTimestamp = 0;
   private browserName = "Chromium";
+  private browserFirstUse = false;
 
   constructor(
     private readonly videoDir: string,
@@ -29,16 +30,13 @@ export class BrowserRecorder {
 
     const preparedProfile = await prepareBrowserProfile(this.browserProfileDir);
     this.browserName = preparedProfile.browserName;
+    this.browserFirstUse = preparedProfile.firstUse;
 
     const launchArgs = [
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-session-crashed-bubble",
     ];
-
-    if (preparedProfile.profileDirectory) {
-      launchArgs.push("--profile-directory=" + preparedProfile.profileDirectory);
-    }
 
     try {
       this.context = await chromium.launchPersistentContext(preparedProfile.userDataDir, {
@@ -63,14 +61,14 @@ export class BrowserRecorder {
         lower.includes("profile") && lower.includes("lock")
       ) {
         throw new Error(
-          "O " + preparedProfile.browserName +
-          " ja esta usando esse perfil. Feche todas as janelas do navegador padrao e tente gravar novamente."
+          "O perfil do Auto Future para " + preparedProfile.browserName +
+          " ja esta em uso. Feche a janela de navegador aberta pelo Auto Future e tente novamente."
         );
       }
 
       throw new Error(
-        "Nao consegui abrir o navegador padrao (" + preparedProfile.browserName +
-        ") com o perfil real. " + message
+        "Nao consegui abrir " + preparedProfile.browserName +
+        " com o perfil persistente do Auto Future. " + message
       );
     }
 
@@ -240,8 +238,11 @@ export class BrowserRecorder {
     return Boolean(this.recording);
   }
 
-  getBrowserSessionInfo(): { browserName: string } {
-    return { browserName: this.browserName };
+  getBrowserSessionInfo(): { browserName: string; firstUse: boolean } {
+    return {
+      browserName: this.browserName,
+      firstUse: this.browserFirstUse,
+    };
   }
 
   private recordAction(

@@ -87,6 +87,7 @@ app.whenReady().then(async () => {
       id: recording.id,
       createdAt: recording.createdAt,
       browserName: browser.browserName,
+      firstUse: browser.firstUse,
     };
   });
 
