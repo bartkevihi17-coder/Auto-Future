@@ -45,6 +45,8 @@ export interface AutomationRecording {
   actions: AutomationAction[];
   videoPath?: string;
   videoSegments?: AutomationVideoSegment[];
+  domainIconPath?: string;
+  domainIconSourceUrl?: string;
   executionSpeed?: ExecutionSpeed;
   optimizationEnabled?: boolean;
   notificationsEnabled?: boolean;

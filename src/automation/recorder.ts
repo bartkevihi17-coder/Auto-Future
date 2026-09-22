@@ -30,9 +30,11 @@ export class BrowserRecorder {
   private pageIds = new Map<Page, string>();
   private trackedPages = new Map<Page, { pageId: string; startedAtMs: number }>();
   private lastRecordedUrlByPage = new Map<string, string>();
+  private domainIconPromise: Promise<void> | null = null;
 
   constructor(
     private readonly videoDir: string,
+    private readonly iconDir: string,
     private readonly browserProfileDir: string,
     private readonly onAction?: EventSink,
     private readonly onUnsupported?: UnsupportedSink
@@ -44,6 +46,7 @@ export class BrowserRecorder {
     }
 
     await fs.mkdir(this.videoDir, { recursive: true });
+    await fs.mkdir(this.iconDir, { recursive: true });
 
     const preparedProfile = await prepareBrowserProfile(this.browserProfileDir);
     this.browserName = preparedProfile.browserName;
@@ -54,6 +57,7 @@ export class BrowserRecorder {
     this.pageIds.clear();
     this.trackedPages.clear();
     this.lastRecordedUrlByPage.clear();
+    this.domainIconPromise = null;
 
     const launchArgs = [
       "--no-first-run",
@@ -403,6 +407,9 @@ export class BrowserRecorder {
 
     try {
       await this.page.goto(initialUrl, { waitUntil: "domcontentloaded" });
+      this.domainIconPromise = this.captureDomainIcon(this.page, initialUrl).catch(
+        () => undefined
+      );
       this.scheduleReadabilityCheck(2500, 0);
     } catch (error) {
       await this.context.close().catch(() => undefined);
@@ -423,6 +430,9 @@ export class BrowserRecorder {
     this.clearReadabilityTimer();
 
     const finished = this.recording;
+
+    await this.domainIconPromise?.catch(() => undefined);
+
     const pageVideos = [...this.trackedPages.entries()].map(([page, meta]) => ({
       page,
       meta,
@@ -485,6 +495,7 @@ export class BrowserRecorder {
     this.pageIds.clear();
     this.trackedPages.clear();
     this.lastRecordedUrlByPage.clear();
+    this.domainIconPromise = null;
 
     return finished;
   }
@@ -547,6 +558,151 @@ export class BrowserRecorder {
         if (fallback) this.page = fallback;
       }
     });
+  }
+
+  private async captureDomainIcon(page: Page, initialUrl: string): Promise<void> {
+    const recording = this.recording;
+    const context = this.context;
+
+    if (!recording || !context || page.isClosed()) return;
+
+    await page
+      .waitForLoadState("load", { timeout: 4_000 })
+      .catch(() => undefined);
+
+    const discoveredIcon = await page
+      .evaluate(() => {
+        const links = Array.from(
+          document.querySelectorAll<HTMLLinkElement>("link[rel][href]")
+        );
+
+        const icons = links
+          .filter((link) =>
+            link.rel
+              .toLocaleLowerCase()
+              .split(/\s+/)
+              .some((token) => token.includes("icon"))
+          )
+          .map((link) => {
+            const type = (link.type || "").toLocaleLowerCase();
+            const rel = link.rel.toLocaleLowerCase();
+            const sizes = link.sizes?.value || "";
+            const sizeMatch = sizes.match(/(\d+)x(\d+)/i);
+            const sizeScore = sizeMatch ? Number(sizeMatch[1]) : 0;
+
+            let score = sizeScore;
+
+            if (type.includes("svg")) score += 10_000;
+            if (rel === "icon") score += 4_000;
+            if (rel.includes("shortcut")) score += 3_000;
+            if (rel.includes("apple-touch-icon")) score += 2_000;
+
+            return {
+              href: link.href,
+              score,
+            };
+          })
+          .filter((entry) => Boolean(entry.href))
+          .sort((a, b) => b.score - a.score);
+
+        return icons[0]?.href || null;
+      })
+      .catch(() => null);
+
+    let fallbackIcon: string | null = null;
+
+    try {
+      fallbackIcon = new URL("/favicon.ico", initialUrl).href;
+    } catch {
+      fallbackIcon = null;
+    }
+
+    const candidates = [...new Set([discoveredIcon, fallbackIcon].filter(Boolean))] as string[];
+
+    for (const candidate of candidates) {
+      let contentType = "";
+      let bytes: Buffer | null = null;
+
+      if (candidate.startsWith("data:")) {
+        const match = candidate.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+
+        if (!match) continue;
+
+        contentType = (match[1] || "image/svg+xml").toLocaleLowerCase();
+
+        try {
+          bytes = match[2]
+            ? Buffer.from(match[3], "base64")
+            : Buffer.from(decodeURIComponent(match[3]), "utf8");
+        } catch {
+          bytes = null;
+        }
+      } else if (/^https?:/i.test(candidate)) {
+        const response = await context.request
+          .get(candidate, {
+            timeout: 4_000,
+            failOnStatusCode: false,
+          })
+          .catch(() => null);
+
+        if (!response || !response.ok()) continue;
+
+        contentType = String(
+          response.headers()["content-type"] || ""
+        )
+          .split(";")[0]
+          .trim()
+          .toLocaleLowerCase();
+
+        bytes = await response.body().catch(() => null);
+      }
+
+      if (!bytes || bytes.length === 0 || bytes.length > 2 * 1024 * 1024) {
+        continue;
+      }
+
+      const pathname = (() => {
+        try {
+          return new URL(candidate).pathname.toLocaleLowerCase();
+        } catch {
+          return "";
+        }
+      })();
+
+      let extension = "ico";
+
+      if (contentType.includes("svg") || pathname.endsWith(".svg")) {
+        extension = "svg";
+      } else if (contentType.includes("png") || pathname.endsWith(".png")) {
+        extension = "png";
+      } else if (
+        contentType.includes("webp") ||
+        pathname.endsWith(".webp")
+      ) {
+        extension = "webp";
+      } else if (
+        contentType.includes("jpeg") ||
+        contentType.includes("jpg") ||
+        pathname.endsWith(".jpg") ||
+        pathname.endsWith(".jpeg")
+      ) {
+        extension = "jpg";
+      }
+
+      const finalPath = path.join(
+        this.iconDir,
+        recording.id + "." + extension
+      );
+
+      await fs.writeFile(finalPath, bytes);
+
+      if (this.recording?.id === recording.id) {
+        recording.domainIconPath = finalPath;
+        recording.domainIconSourceUrl = candidate;
+      }
+
+      return;
+    }
   }
 
   private recordNavigation(page: Page, url: string): void {
@@ -723,6 +879,7 @@ export class BrowserRecorder {
     this.pageIds.clear();
     this.trackedPages.clear();
     this.lastRecordedUrlByPage.clear();
+    this.domainIconPromise = null;
 
     await context?.close().catch(() => undefined);
     this.onUnsupported?.(info);

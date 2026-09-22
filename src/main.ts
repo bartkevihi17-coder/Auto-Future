@@ -36,6 +36,10 @@ function videosDir(): string {
   return path.join(recordingsDir(), "videos");
 }
 
+function iconsDir(): string {
+  return path.join(recordingsDir(), "icons");
+}
+
 function stateDir(): string {
   return path.join(app.getPath("userData"), "state");
 }
@@ -163,6 +167,9 @@ function withVideoUrl(recording: AutomationRecording) {
     executionSpeed: normalizeExecutionSpeed(recording.executionSpeed),
     optimizationEnabled: normalizeOptimization(recording.optimizationEnabled),
     notificationsEnabled: normalizeNotifications(recording.notificationsEnabled),
+    domainIconUrl: recording.domainIconPath
+      ? pathToFileURL(recording.domainIconPath).href
+      : null,
     videoUrl: recording.videoPath
       ? pathToFileURL(recording.videoPath).href
       : null,
@@ -568,10 +575,12 @@ app.whenReady().then(async () => {
   app.setAppUserModelId("com.autofuture.desktop");
 
   await fs.mkdir(videosDir(), { recursive: true });
+  await fs.mkdir(iconsDir(), { recursive: true });
   await fs.mkdir(stateDir(), { recursive: true });
 
   recorder = new BrowserRecorder(
     videosDir(),
+    iconsDir(),
     browserProfileDir(),
     (action) => {
       mainWindow?.webContents.send("recording:action", action);
@@ -782,6 +791,10 @@ app.whenReady().then(async () => {
       if (segment.videoPath) {
         await fs.rm(segment.videoPath, { force: true }).catch(() => undefined);
       }
+    }
+
+    if (recording?.domainIconPath) {
+      await fs.rm(recording.domainIconPath, { force: true }).catch(() => undefined);
     }
 
     await fs.rm(path.join(recordingsDir(), id + ".json"), {

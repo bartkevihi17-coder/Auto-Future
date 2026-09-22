@@ -4808,7 +4808,7 @@ body.logged-in .background-tint {
   display: block;
   width: 100%;
   overflow: hidden;
-  font-size: 6px;
+  font-size: 8.5px;
   font-weight: 850;
   line-height: 1.05;
   text-align: center;
@@ -4967,13 +4967,13 @@ body.logged-in .background-tint {
 }
 
 #automation-library .automation-bookmark {
-  width: 49px;
-  height: 37px;
-  padding: 5px 5px 9px;
+  width: 56px;
+  height: 41px;
+  padding: 6px 5px 10px;
 }
 
 #automation-library .automation-bookmark > span {
-  font-size: 6.8px;
+  font-size: 9.5px;
 }
 
 @media (max-width: 760px) {
@@ -4984,4 +4984,60 @@ body.logged-in .background-tint {
   #automation-library .automation-card {
     min-height: 205px;
   }
+}
+
+
+/* ===== Domain icon on automation cards ===== */
+
+.automation-card__icon {
+  position: relative;
+  overflow: hidden;
+  border-color: #dde1ea;
+  color: #6d7382;
+  background: #f7f8fb;
+}
+
+.automation-card__icon-fallback,
+.automation-card__domain-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.automation-card__icon-fallback {
+  display: grid;
+  place-items: center;
+  padding: 5px;
+}
+
+.automation-card__icon-fallback svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.automation-card__domain-icon {
+  z-index: 2;
+  display: none;
+  padding: 3px;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.automation-card__icon.has-image {
+  border-color: #e2e4ea;
+  background: #ffffff;
+}
+
+.automation-card__icon.has-image .automation-card__domain-icon {
+  display: block;
+}
+
+.automation-card__icon.has-image .automation-card__icon-fallback {
+  display: none;
 }

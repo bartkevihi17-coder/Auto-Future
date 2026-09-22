@@ -1468,6 +1468,14 @@ function renderFolderCard(folder, surface) {
   return card;
 }
 
+function domainFaviconFallback(initialUrl) {
+  try {
+    return new URL("/favicon.ico", initialUrl).href;
+  } catch {
+    return "";
+  }
+}
+
 function renderAutomationCard(recording, surface = "editor") {
   const card = document.createElement("article");
   card.className = "automation-card surface-card";
@@ -1482,6 +1490,20 @@ function renderAutomationCard(recording, surface = "editor") {
       : speedLabel(recording.executionSpeed);
   const actions = recording.actions?.length || 0;
   const tags = recordingTags(recording);
+  const domainIconUrl =
+    recording.domainIconUrl || domainFaviconFallback(recording.initialUrl);
+
+  const domainIconHtml =
+    '<div class="automation-card__icon">' +
+      '<span class="automation-card__icon-fallback" aria-hidden="true">' +
+        '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.4 2.4 3.5 5.3 3.5 8.5S14.4 18.1 12 20.5M12 3.5C9.6 5.9 8.5 8.8 8.5 12s1.1 6.1 3.5 8.5"></path></svg>' +
+      "</span>" +
+      (domainIconUrl
+        ? '<img class="automation-card__domain-icon" src="' +
+          escapeHtml(domainIconUrl) +
+          '" alt="" draggable="false" />'
+        : "") +
+    "</div>";
 
   if (tags.length) {
     card.classList.add("has-tags");
@@ -1508,7 +1530,7 @@ function renderAutomationCard(recording, surface = "editor") {
   card.innerHTML =
     tagHtml +
     '<div class="automation-card__top">' +
-      '<div class="automation-card__icon">✦</div>' +
+      domainIconHtml +
       '<div class="automation-card__meta">' +
         "<span>" + escapeHtml(modeLabel) + "</span>" +
         "<span>" + actions + " ações</span>" +
@@ -1518,7 +1540,6 @@ function renderAutomationCard(recording, surface = "editor") {
       "<h3>" + escapeHtml(recording.name || "Automação") + "</h3>" +
       "<p>" + escapeHtml(recording.initialUrl || "") + "</p>" +
     "</div>" +
-    tagHtml +
     '<div class="automation-card__foot">' +
       "<span>" +
         (scheduleTotal
@@ -1567,6 +1588,28 @@ function renderAutomationCard(recording, surface = "editor") {
   card.addEventListener("dragend", () => {
     card.classList.remove("is-dragging");
   });
+
+  const domainIcon = card.querySelector(".automation-card__domain-icon");
+  const domainIconBox = card.querySelector(".automation-card__icon");
+
+  if (domainIcon && domainIconBox) {
+    const syncDomainIcon = () => {
+      domainIconBox.classList.toggle(
+        "has-image",
+        domainIcon.complete && domainIcon.naturalWidth > 0
+      );
+    };
+
+    domainIcon.addEventListener("load", syncDomainIcon);
+    domainIcon.addEventListener("error", () => {
+      domainIconBox.classList.remove("has-image");
+      domainIcon.remove();
+    });
+
+    if (domainIcon.complete) {
+      requestAnimationFrame(syncDomainIcon);
+    }
+  }
 
   card
     .querySelector(".automation-edit-button")
