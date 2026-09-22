@@ -39,18 +39,26 @@ export async function runRecording(
       viewport: { width: 1280, height: 720 },
       args: launchArgs,
     });
-  } catch (firstError) {
-    if (!preparedProfile.channel && !preparedProfile.executablePath) {
-      throw firstError;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+
+    if (
+      lower.includes("processsingleton") ||
+      lower.includes("already in use") ||
+      lower.includes("user data directory") ||
+      lower.includes("profile") && lower.includes("lock")
+    ) {
+      throw new Error(
+        "O " + preparedProfile.browserName +
+        " ja esta usando esse perfil. Feche todas as janelas do navegador padrao antes de executar a automacao."
+      );
     }
 
-    context = await chromium.launchPersistentContext(preparedProfile.userDataDir, {
-      headless: options.headless,
-      viewport: { width: 1280, height: 720 },
-      args: launchArgs,
-    }).catch(() => {
-      throw firstError;
-    });
+    throw new Error(
+      "Nao consegui abrir o navegador padrao (" + preparedProfile.browserName +
+      ") com o perfil real. " + message
+    );
   }
 
   try {

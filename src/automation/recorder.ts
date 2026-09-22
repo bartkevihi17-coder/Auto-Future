@@ -52,22 +52,26 @@ export class BrowserRecorder {
         },
         args: launchArgs,
       });
-    } catch (firstError) {
-      if (preparedProfile.channel || preparedProfile.executablePath) {
-        this.context = await chromium.launchPersistentContext(preparedProfile.userDataDir, {
-          headless: false,
-          viewport: { width: 1280, height: 720 },
-          recordVideo: {
-            dir: this.videoDir,
-            size: { width: 1280, height: 720 },
-          },
-          args: launchArgs,
-        }).catch(() => {
-          throw firstError;
-        });
-      } else {
-        throw firstError;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const lower = message.toLowerCase();
+
+      if (
+        lower.includes("processsingleton") ||
+        lower.includes("already in use") ||
+        lower.includes("user data directory") ||
+        lower.includes("profile") && lower.includes("lock")
+      ) {
+        throw new Error(
+          "O " + preparedProfile.browserName +
+          " ja esta usando esse perfil. Feche todas as janelas do navegador padrao e tente gravar novamente."
+        );
       }
+
+      throw new Error(
+        "Nao consegui abrir o navegador padrao (" + preparedProfile.browserName +
+        ") com o perfil real. " + message
+      );
     }
 
     this.recording = {
