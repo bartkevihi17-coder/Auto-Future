@@ -198,6 +198,7 @@ const qwenSettingsSaveTest = document.querySelector("#qwen-settings-save-test");
 
 const aiChatThread = document.querySelector("#ai-chat-thread");
 const aiEmptyState = document.querySelector("#ai-empty-state");
+const aiClearConversation = document.querySelector("#ai-clear-conversation");
 const aiConnectionLabel = document.querySelector("#ai-connection-label");
 const aiPromptBar = document.querySelector("#ai-prompt-bar");
 const aiAgentWorkspace = document.querySelector("#ai-agent-workspace");
@@ -264,6 +265,7 @@ let aiAgentAction = null;
 let aiAgentProposalState = null;
 let aiAgentRejected = [];
 let aiAgentHistory = [];
+let aiAgentContextEvents = [];
 let aiAgentRunning = false;
 let aiAgentManualMode = false;
 let aiAgentRequestSerial = 0;
@@ -2086,6 +2088,41 @@ function setAiProposalButtonsVisible(visible) {
   aiAgentManual.classList.toggle("is-hidden", !visible);
 }
 
+function compactAiProposal(proposal) {
+  if (!proposal) return null;
+
+  return {
+    action: proposal.action || null,
+    targetId: proposal.targetId || null,
+    value:
+      typeof proposal.value === "string"
+        ? proposal.value.slice(0, 500)
+        : null,
+    key: proposal.key || null,
+    url: proposal.url || null,
+    label: proposal.label || null,
+  };
+}
+
+function pushAiAgentContextEvent(type, proposal = null, detail = {}) {
+  const event = {
+    order: aiAgentContextEvents.length + 1,
+    type,
+    proposal: compactAiProposal(proposal),
+    pageUrl:
+      aiAgentBrowser.getURL?.() ||
+      aiBrowserUrl.textContent ||
+      null,
+    ...detail,
+  };
+
+  aiAgentContextEvents.push(event);
+
+  if (aiAgentContextEvents.length > 60) {
+    aiAgentContextEvents = aiAgentContextEvents.slice(-60);
+  }
+}
+
 async function requestAiAgentProposal(manualNote = "") {
   if (!aiAgentAction || aiAgentManualMode) return;
 
@@ -2103,6 +2140,7 @@ async function requestAiAgentProposal(manualNote = "") {
       objective: aiAgentAction.instruction,
       snapshot,
       rejected: aiAgentRejected,
+      contextEvents: aiAgentContextEvents,
       manualNote,
     });
 
@@ -2370,6 +2408,13 @@ async function undoAiAgentLastAction() {
     }
 
     aiAgentHistory.pop();
+    pushAiAgentContextEvent("undo", entry.proposal, {
+      revertedMode: entry.mode,
+      restoredUrl:
+        aiAgentBrowser.getURL?.() ||
+        aiBrowserUrl.textContent ||
+        null,
+    });
     aiAgentRejected = [];
     syncAiUndoButton();
     setAiAgentStatus("Ação anterior restaurada", "success");
@@ -2519,6 +2564,13 @@ async function executeAiAgentProposal() {
       await finalizeAiUndoEntry(undoEntry);
     }
 
+    pushAiAgentContextEvent("approved", proposal, {
+      resultingUrl:
+        aiAgentBrowser.getURL?.() ||
+        aiBrowserUrl.textContent ||
+        null,
+    });
+
     aiAgentRejected = [];
     aiAgentProposalState = null;
     aiAgentProposal.classList.add("is-hidden");
@@ -2562,6 +2614,13 @@ async function leaveAiAgentManualMode() {
   syncAiUndoButton();
   aiAgentManualBar.classList.add("is-hidden");
   aiAgentRejected = [];
+  pushAiAgentContextEvent("manual", null, {
+    note: "O usuário alterou manualmente o estado da página e devolveu o controle para a IA.",
+    resultingUrl:
+      aiAgentBrowser.getURL?.() ||
+      aiBrowserUrl.textContent ||
+      null,
+  });
   setAiAgentStatus("Devolvendo controle para a IA...", "working");
 
   await waitAi(350);
@@ -2588,6 +2647,7 @@ async function startAiAgent(action) {
   aiAgentProposalState = null;
   aiAgentRejected = [];
   aiAgentHistory = [];
+  aiAgentContextEvents = [];
   aiAgentManualMode = false;
   aiAgentRunning = true;
   aiAgentRequestSerial += 1;
@@ -2617,6 +2677,11 @@ async function startAiAgent(action) {
 
     if (!aiAgentAction || aiAgentAction.id !== action.id) return;
 
+    pushAiAgentContextEvent("started", null, {
+      objective: action.instruction || "",
+      initialUrl,
+    });
+
     await requestAiAgentProposal();
   } catch (error) {
     setAiAgentStatus("Falha ao abrir o navegador", "error");
@@ -2636,6 +2701,7 @@ async function closeAiAgent() {
   aiAgentProposalState = null;
   aiAgentRejected = [];
   aiAgentHistory = [];
+  aiAgentContextEvents = [];
   syncAiUndoButton();
 
   await clearAiTargetBubble();
@@ -4844,6 +4910,47 @@ aiPromptInput.addEventListener("keydown", (event) => {
   }
 });
 
+aiClearConversation.addEventListener("click", () => {
+  if (aiBusy || aiAgentRunning) {
+    openNoticeModal({
+      eyebrow: "I.A. EM USO",
+      title: "Finalize a ação atual primeiro",
+      description:
+        "Não é possível limpar o histórico enquanto a IA está cadastrando ou executando uma ação.",
+      confirmLabel: "Entendi",
+    });
+    return;
+  }
+
+  openConfirmModal({
+    eyebrow: "LIMPAR CONVERSA",
+    title: "Limpar o histórico da I.A.?",
+    description:
+      "Os cards de ações cadastradas nesta tela serão removidos. Isso não apaga as automações normais salvas no Editor.",
+    note:
+      "O contexto de execuções encerradas também será descartado. Novas ações começarão com um contexto limpo.",
+    confirmLabel: "Limpar conversa",
+    onConfirm: async () => {
+      await ipcRenderer.invoke("ai:actions:clear");
+
+      aiAgentRejected = [];
+      aiAgentHistory = [];
+      aiAgentContextEvents = [];
+
+      aiChatThread
+        .querySelectorAll(".ai-action-card, .ai-thought-wrap")
+        .forEach((element) => element.remove());
+
+      aiStartUrl.value = "";
+      aiPromptInput.value = "";
+      resizeAiPrompt();
+      syncAiSendAvailability();
+      aiEmptyState.classList.remove("is-hidden");
+      setStatus("Conversa da I.A. limpa", "success");
+    },
+  });
+});
+
 aiSendButton.addEventListener("click", () => {
   if (aiBusy) {
     stopAiPrompt();
@@ -4932,6 +5039,10 @@ aiAgentReject.addEventListener("click", async () => {
     value: proposal.value || null,
     url: proposal.url || null,
     label: proposal.label || null,
+  });
+
+  pushAiAgentContextEvent("rejected", proposal, {
+    note: "O usuário recusou esta sugestão e quer outra opção para o mesmo objetivo.",
   });
 
   aiAgentProposalState = null;

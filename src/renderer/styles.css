@@ -6421,3 +6421,33 @@ body.logged-in .background-tint {
   border-color: #cdb6e8;
   background: #f5edff;
 }
+
+
+/* ===== AI conversation controls ===== */
+
+.ai-page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+#ai-clear-conversation {
+  min-height: 30px;
+  border-color: #e2dce7;
+  color: #776d7f;
+  background: rgba(255,255,255,0.88);
+}
+
+#ai-clear-conversation:hover {
+  color: #554a5e;
+  border-color: #d7cfdd;
+  background: #ffffff;
+}
+
+@media (max-width: 760px) {
+  .ai-page-head-actions {
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+}
