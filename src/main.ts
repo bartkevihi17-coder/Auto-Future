@@ -442,9 +442,28 @@ app.whenReady().then(async () => {
     "recording:start",
     async (_event, payload: { url: string; name?: string }) => {
       const url = new URL(payload.url).toString();
+      const name = payload.name?.trim() || "Nova automacao";
+      const normalizedName = name.replace(/\s+/g, " ").trim().toLocaleLowerCase("pt-BR");
+      const existingRecordings = await listRecordings();
+
+      const duplicate = existingRecordings.find(
+        (recording) =>
+          (recording.name || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLocaleLowerCase("pt-BR") === normalizedName
+      );
+
+      if (duplicate) {
+        throw new Error(
+          "Ja existe uma automacao chamada \"" + duplicate.name +
+          "\". Escolha outro nome antes de gravar."
+        );
+      }
+
       const recording = await recorder.start(
         url,
-        payload.name?.trim() || "Nova automacao"
+        name
       );
 
       const browser = recorder.getBrowserSessionInfo();

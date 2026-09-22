@@ -260,7 +260,10 @@ function openPage(name, options = {}) {
 
   if (name === "editor") {
     void refreshRecordings();
-    if (!currentRecording || editorWorkspace.classList.contains("is-hidden")) {
+
+    if (!options.keepEditorOpen) {
+      currentRecording = null;
+      selectedActionId = null;
       showEditorLibrary();
     }
   } else if (name === "recordings") {
@@ -438,7 +441,7 @@ async function openAutomationForEdit(id) {
     setStatus("Abrindo automação", "working");
     const result = await ipcRenderer.invoke("recording:load", id);
     loadEditor(result.recording);
-    openPage("editor");
+    openPage("editor", { keepEditorOpen: true });
     setStatus("Automação carregada", "success");
   } catch (error) {
     setStatus("Erro ao abrir", "error");
@@ -2090,7 +2093,8 @@ stopButton.addEventListener("click", async () => {
     setStatus("Salva · " + result.recording.actions.length + " ações", "success");
 
     await refreshRecordings();
-    loadEditor(result.recording);
+    currentRecording = null;
+    selectedActionId = null;
     openPage("editor");
   } catch (error) {
     setStatus("Erro", "error");

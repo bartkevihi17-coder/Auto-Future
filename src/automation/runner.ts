@@ -178,36 +178,92 @@ export async function runRecording(
       recording.actions.find((action) => action.pageId)?.pageId || "p1";
 
     const pageMap = new Map<string, Page>();
-    pageMap.set(firstRecordedPageId, page);
+    const claimedPages = new Set<Page>();
+    const pendingPages: Page[] = [];
+
+    const claimPage = (pageId: string, target: Page): Page => {
+      pageMap.set(pageId, target);
+      claimedPages.add(target);
+
+      const queuedIndex = pendingPages.indexOf(target);
+      if (queuedIndex >= 0) pendingPages.splice(queuedIndex, 1);
+
+      return target;
+    };
+
+    claimPage(firstRecordedPageId, page);
+
+    context.on("page", (openedPage) => {
+      if (!claimedPages.has(openedPage)) {
+        pendingPages.push(openedPage);
+      }
+    });
 
     const resolvePageForAction = async (action: AutomationAction): Promise<Page> => {
       if (!action.pageId) return page;
 
       const mapped = pageMap.get(action.pageId);
-      if (mapped && !mapped.isClosed()) return mapped;
+      if (mapped && !mapped.isClosed()) {
+        await mapped
+          .waitForLoadState("domcontentloaded", { timeout: 10_000 })
+          .catch(() => undefined);
+        return mapped;
+      }
 
-      const usedPages = new Set(pageMap.values());
-      const existingUnmapped = context
-        .pages()
-        .find((candidate) => !candidate.isClosed() && !usedPages.has(candidate));
+      if (mapped?.isClosed()) {
+        pageMap.delete(action.pageId);
+        claimedPages.delete(mapped);
+      }
 
-      if (existingUnmapped) {
-        pageMap.set(action.pageId, existingUnmapped);
-        return existingUnmapped;
+      const expectedUrl = comparableUrl(action.url);
+      const candidates = [
+        ...pendingPages,
+        ...context.pages().filter((candidate) => !pendingPages.includes(candidate)),
+      ];
+
+      const matchingPage = candidates.find(
+        (candidate) =>
+          !candidate.isClosed() &&
+          !claimedPages.has(candidate) &&
+          expectedUrl &&
+          comparableUrl(candidate.url()) === expectedUrl
+      );
+
+      const availablePage =
+        matchingPage ||
+        candidates.find(
+          (candidate) => !candidate.isClosed() && !claimedPages.has(candidate)
+        );
+
+      if (availablePage) {
+        claimPage(action.pageId, availablePage);
+        await availablePage
+          .waitForLoadState("domcontentloaded", { timeout: 10_000 })
+          .catch(() => undefined);
+        return availablePage;
       }
 
       const openedByPreviousAction = await context
-        .waitForEvent("page", { timeout: 1800 })
+        .waitForEvent("page", { timeout: 5_000 })
         .catch(() => null);
 
       if (openedByPreviousAction && !openedByPreviousAction.isClosed()) {
-        pageMap.set(action.pageId, openedByPreviousAction);
+        claimPage(action.pageId, openedByPreviousAction);
+        await openedByPreviousAction
+          .waitForLoadState("domcontentloaded", { timeout: 10_000 })
+          .catch(() => undefined);
         return openedByPreviousAction;
       }
 
-      const created = await context.newPage();
-      pageMap.set(action.pageId, created);
-      return created;
+      if (action.type === "navigate") {
+        const created = await context.newPage();
+        claimPage(action.pageId, created);
+        return created;
+      }
+
+      throw new Error(
+        "A automacao esperava continuar em uma nova aba/janela, mas ela nao foi encontrada."
+      );
     };
 
     if (recording.initialUrl && page.url() !== recording.initialUrl) {
@@ -249,10 +305,25 @@ export async function runRecording(
       }
 
       const actionPage = await resolvePageForAction(action);
+      const nextAction = recording.actions[index + 1];
+
+      let expectedNewPage: Promise<Page | null> | null = null;
+
+      if (
+        action.type === "click" &&
+        nextAction?.pageId &&
+        nextAction.pageId !== action.pageId &&
+        !pageMap.has(nextAction.pageId)
+      ) {
+        expectedNewPage = context
+          .waitForEvent("page", { timeout: 8_000 })
+          .then((openedPage) => openedPage)
+          .catch(() => null);
+      }
 
       switch (action.type) {
         case "navigate": {
-          if (actionPage.url() !== action.url) {
+          if (comparableUrl(actionPage.url()) !== comparableUrl(action.url)) {
             await actionPage.goto(action.url, { waitUntil: "domcontentloaded" });
           }
           break;
@@ -260,6 +331,18 @@ export async function runRecording(
 
         case "click": {
           await clickAction(actionPage, action);
+
+          if (expectedNewPage && nextAction?.pageId) {
+            const openedPage = await expectedNewPage;
+
+            if (openedPage && !openedPage.isClosed()) {
+              claimPage(nextAction.pageId, openedPage);
+              await openedPage
+                .waitForLoadState("domcontentloaded", { timeout: 10_000 })
+                .catch(() => undefined);
+            }
+          }
+
           break;
         }
 
