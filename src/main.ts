@@ -911,6 +911,7 @@ app.whenReady().then(async () => {
       _event,
       payload: {
         instruction?: string;
+        startUrl?: string;
         effort?: string;
       }
     ) => {
@@ -918,6 +919,12 @@ app.whenReady().then(async () => {
 
       if (!instruction) {
         throw new Error("Descreva o que a automação precisa fazer.");
+      }
+
+      const startUrl = normalizeAiActionUrl(payload?.startUrl);
+
+      if (!startUrl) {
+        throw new Error("Informe uma URL inicial válida usando http:// ou https://.");
       }
 
       const settings = await getQwenClientSettings();
@@ -931,17 +938,21 @@ app.whenReady().then(async () => {
             content:
               "Você cadastra solicitações de automação para o Auto Future. " +
               "Não explique como executar, não gere tutorial, pseudocódigo ou código. " +
-              "Retorne SOMENTE JSON válido com exatamente estas chaves: " +
-              "{\"name\":\"nome curto da automação\",\"startUrl\":\"URL inicial HTTPS ou string vazia\"}. " +
+              "Retorne SOMENTE JSON válido com exatamente esta chave: " +
+              "{\"name\":\"nome curto da automação\"}. " +
               "O nome deve ter no máximo 64 caracteres. " +
-              "Use startUrl apenas quando o serviço/site inicial estiver claro na solicitação. " +
+              "A URL inicial foi informada pelo usuário e NÃO deve ser escolhida, alterada ou inferida por você. " +
               "Nível solicitado: " +
               effort +
               ".",
           },
           {
             role: "user",
-            content: instruction,
+            content:
+              "URL INICIAL OBRIGATÓRIA: " +
+              startUrl +
+              "\nOBJETIVO: " +
+              instruction,
           },
         ],
         {
@@ -952,7 +963,6 @@ app.whenReady().then(async () => {
       );
 
       const parsed = extractJsonObject(result.content);
-      const startUrl = normalizeAiActionUrl(parsed.startUrl);
       let domain: string | undefined;
 
       if (startUrl) {

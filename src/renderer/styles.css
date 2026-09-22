@@ -6346,3 +6346,78 @@ body.logged-in .background-tint {
     justify-content: flex-end;
   }
 }
+
+
+/* ===== AI required start URL + undo action ===== */
+
+.ai-start-url-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  border-bottom: 1px solid rgba(245,245,245,0.10);
+  padding-bottom: 8px;
+}
+
+.ai-start-url-row > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: rgba(245,245,245,0.55);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ai-start-url-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  color: #f5f5f5;
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  line-height: 22px;
+  outline: none;
+}
+
+.ai-start-url-row > input::placeholder {
+  color: rgba(245,245,245,0.40);
+}
+
+.ai-start-url-row:has(input:focus) > svg {
+  color: #9cb1ff;
+}
+
+.ai-start-url-row:has(input.is-invalid) {
+  border-bottom-color: rgba(255,116,142,0.65);
+}
+
+.ai-start-url-row:has(input.is-invalid) > svg,
+.ai-start-url-row > input.is-invalid {
+  color: #ff9aae;
+}
+
+.ai-agent-actions #ai-agent-undo {
+  min-width: 96px;
+}
+
+.ai-agent-actions #ai-agent-undo:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.ai-agent-actions #ai-agent-undo:not(:disabled) {
+  color: #59466f;
+  border-color: #d8cae7;
+  background: #faf6ff;
+}
+
+.ai-agent-actions #ai-agent-undo:not(:disabled):hover {
+  color: #6b34ad;
+  border-color: #cdb6e8;
+  background: #f5edff;
+}

@@ -616,6 +616,7 @@
                   <span id="ai-agent-proposal-detail"></span>
                 </div>
                 <div class="ai-agent-actions">
+                  <button id="ai-agent-undo" class="button" type="button" disabled>↶ Voltar ação</button>
                   <button id="ai-agent-manual" class="button" type="button">Manual</button>
                   <button id="ai-agent-reject" class="button" type="button">Recusar</button>
                   <button id="ai-agent-approve" class="button primary" type="button">Aprovar</button>
@@ -655,6 +656,11 @@
                 </div>
 
                 <div class="prompt-bar__field">
+                  <div class="ai-start-url-row">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.4 2.4 3.5 5.3 3.5 8.5S14.4 18.1 12 20.5M12 3.5C9.6 5.9 8.5 8.8 8.5 12s1.1 6.1 3.5 8.5"></path></svg>
+                    <input id="ai-start-url" type="url" placeholder="URL inicial obrigatória · https://..." autocomplete="off" spellcheck="false" aria-label="URL inicial obrigatória" required />
+                  </div>
+
                   <textarea id="ai-prompt-input" class="prompt-bar__input" rows="1" placeholder="Descreva a automação que você quer criar..." aria-label="Prompt da IA"></textarea>
 
                   <div class="prompt-bar__bar">
@@ -681,7 +687,7 @@
                   </div>
                 </div>
               </div>
-              <small class="ai-prompt-hint">Qwen via Groq · a instrução é processada e cadastrada como uma ação do Auto Future.</small>
+              <small class="ai-prompt-hint">A URL inicial é obrigatória e será usada exatamente como ponto de partida da IA.</small>
             </div>
           </div>
         </section>

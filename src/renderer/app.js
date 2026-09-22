@@ -215,9 +215,11 @@ const aiAgentProposalLabel = document.querySelector("#ai-agent-proposal-label");
 const aiAgentProposalDetail = document.querySelector("#ai-agent-proposal-detail");
 const aiAgentApprove = document.querySelector("#ai-agent-approve");
 const aiAgentReject = document.querySelector("#ai-agent-reject");
+const aiAgentUndo = document.querySelector("#ai-agent-undo");
 const aiAgentManual = document.querySelector("#ai-agent-manual");
 const aiAgentManualBar = document.querySelector("#ai-agent-manual-bar");
 const aiAgentManualDone = document.querySelector("#ai-agent-manual-done");
+const aiStartUrl = document.querySelector("#ai-start-url");
 const aiPromptInput = document.querySelector("#ai-prompt-input");
 const aiSendButton = document.querySelector("#ai-send-button");
 const aiPlusButton = document.querySelector("#ai-plus-button");
@@ -261,6 +263,7 @@ let aiActiveThought = null;
 let aiAgentAction = null;
 let aiAgentProposalState = null;
 let aiAgentRejected = [];
+let aiAgentHistory = [];
 let aiAgentRunning = false;
 let aiAgentManualMode = false;
 let aiAgentRequestSerial = 0;
@@ -1621,12 +1624,36 @@ function resizeAiPrompt() {
     aiPromptInput.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
+function normalizeAiStartUrlInput(value) {
+  const candidate = String(value || "").trim();
+
+  try {
+    const url = new URL(candidate);
+    return /^https?:$/.test(url.protocol) ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function syncAiSendAvailability() {
+  const hasPrompt = Boolean(aiPromptInput.value.trim());
+  const hasValidUrl = Boolean(normalizeAiStartUrlInput(aiStartUrl.value));
+
+  aiStartUrl.classList.toggle(
+    "is-invalid",
+    Boolean(aiStartUrl.value.trim()) && !hasValidUrl
+  );
+
+  aiSendButton.disabled = aiBusy ? false : !(hasPrompt && hasValidUrl);
+}
+
 function setAiBusy(busy) {
   aiBusy = busy;
   aiPromptBar.dataset.busy = busy ? "true" : "false";
   aiSendButton.classList.toggle("is-busy", busy);
-  aiSendButton.disabled = busy ? false : !aiPromptInput.value.trim();
   aiPromptInput.disabled = busy;
+  aiStartUrl.disabled = busy;
+  syncAiSendAvailability();
 }
 
 function formatThoughtElapsed(deciseconds) {
@@ -2123,6 +2150,252 @@ async function requestAiAgentProposal(manualNote = "") {
   }
 }
 
+function syncAiUndoButton() {
+  const hasHistory = aiAgentHistory.length > 0;
+  aiAgentUndo.disabled = !hasHistory || aiAgentManualMode || !aiAgentAction;
+  aiAgentUndo.title = hasHistory
+    ? "Voltar a última ação aprovada quando houver uma reversão segura"
+    : "Nenhuma ação aprovada para voltar";
+}
+
+async function captureAiUndoEntry(proposal) {
+  const urlBefore =
+    aiAgentBrowser.getURL?.() ||
+    aiBrowserUrl.textContent ||
+    "about:blank";
+
+  const entry = {
+    proposal: {
+      status: proposal.status,
+      action: proposal.action,
+      targetId: proposal.targetId || null,
+      value: proposal.value || "",
+      key: proposal.key || null,
+      url: proposal.url || null,
+      label: proposal.label || "Ação",
+    },
+    urlBefore,
+    urlAfter: urlBefore,
+    mode: "unknown",
+    marker: null,
+    previousValue: null,
+    contentEditable: false,
+    reversible: false,
+    reason: "",
+  };
+
+  if (proposal.action === "wait") {
+    entry.mode = "wait";
+    entry.reversible = true;
+    return entry;
+  }
+
+  if (proposal.action === "navigate") {
+    entry.mode = "navigation";
+    entry.reversible = true;
+    return entry;
+  }
+
+  if (proposal.action !== "input" || !proposal.targetId) {
+    return entry;
+  }
+
+  const marker =
+    "af-undo-" +
+    Date.now().toString(36) +
+    "-" +
+    Math.random().toString(36).slice(2, 8);
+
+  const targetId = JSON.stringify(proposal.targetId);
+  const markerJson = JSON.stringify(marker);
+
+  const previous = await aiAgentBrowser
+    .executeJavaScript(
+      `(() => {
+        const target = document.querySelector(
+          '[data-af-ai-id="' + CSS.escape(${targetId}) + '"]'
+        );
+
+        if (!target) return null;
+
+        const marker =
+          target.getAttribute("data-af-ai-node-key") || ${markerJson};
+
+        target.setAttribute("data-af-ai-node-key", marker);
+
+        return {
+          marker,
+          contentEditable: Boolean(target.isContentEditable),
+          value: target.isContentEditable
+            ? target.innerHTML
+            : "value" in target
+              ? String(target.value ?? "")
+              : ""
+        };
+      })()`
+    )
+    .catch(() => null);
+
+  if (previous?.marker) {
+    entry.mode = "input";
+    entry.marker = previous.marker;
+    entry.previousValue = previous.value ?? "";
+    entry.contentEditable = previous.contentEditable === true;
+    entry.reversible = true;
+  }
+
+  return entry;
+}
+
+async function finalizeAiUndoEntry(entry) {
+  entry.urlAfter =
+    aiAgentBrowser.getURL?.() ||
+    aiBrowserUrl.textContent ||
+    entry.urlBefore;
+
+  if (
+    entry.mode === "unknown" &&
+    entry.urlAfter &&
+    entry.urlBefore &&
+    entry.urlAfter !== entry.urlBefore
+  ) {
+    entry.mode = "navigation";
+    entry.reversible = true;
+  }
+
+  if (!entry.reversible) {
+    entry.reason =
+      "Essa ação alterou a página sem gerar um estado que o Auto Future consiga reverter com segurança.";
+  }
+
+  aiAgentHistory.push(entry);
+
+  if (aiAgentHistory.length > 50) {
+    aiAgentHistory.shift();
+  }
+
+  syncAiUndoButton();
+}
+
+async function undoAiAgentLastAction() {
+  if (!aiAgentAction || aiAgentManualMode || aiAgentHistory.length === 0) {
+    return;
+  }
+
+  const entry = aiAgentHistory[aiAgentHistory.length - 1];
+
+  if (!entry.reversible) {
+    openNoticeModal({
+      eyebrow: "VOLTAR AÇÃO",
+      title: "Essa ação não pode ser desfeita automaticamente",
+      description:
+        entry.reason ||
+        "O site pode ter aplicado uma alteração que não possui reversão segura pelo navegador.",
+      note:
+        "Use o modo Manual se precisar corrigir esse estado. O Auto Future não vai fingir que uma alteração externa foi desfeita.",
+      confirmLabel: "Entendi",
+    });
+    return;
+  }
+
+  aiAgentUndo.disabled = true;
+  aiAgentApprove.disabled = true;
+  aiAgentReject.disabled = true;
+  aiAgentManual.disabled = true;
+  aiAgentRequestSerial += 1;
+  aiAgentProposalState = null;
+  aiAgentProposal.classList.add("is-hidden");
+  setAiAgentStatus("Voltando a última ação...", "working");
+  await clearAiTargetBubble();
+
+  try {
+    if (entry.mode === "input") {
+      const marker = JSON.stringify(entry.marker || "");
+      const previousValue = JSON.stringify(entry.previousValue ?? "");
+      const contentEditable = entry.contentEditable === true;
+
+      const restored = await aiAgentBrowser.executeJavaScript(
+        `(() => {
+          const target = document.querySelector(
+            '[data-af-ai-node-key="' + CSS.escape(${marker}) + '"]'
+          );
+
+          if (!target) return false;
+
+          const previousValue = ${previousValue};
+
+          if (${contentEditable ? "true" : "false"} && target.isContentEditable) {
+            target.innerHTML = previousValue;
+          } else if ("value" in target) {
+            const proto =
+              target.tagName === "TEXTAREA"
+                ? HTMLTextAreaElement.prototype
+                : target.tagName === "SELECT"
+                  ? HTMLSelectElement.prototype
+                  : HTMLInputElement.prototype;
+
+            const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+
+            if (setter) setter.call(target, previousValue);
+            else target.value = previousValue;
+          } else {
+            return false;
+          }
+
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          target.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        })()`
+      );
+
+      if (!restored) {
+        throw new Error(
+          "O campo foi recriado pelo site e não está mais disponível para restauração automática."
+        );
+      }
+    } else if (entry.mode === "navigation") {
+      if (aiAgentBrowser.canGoBack?.()) {
+        aiAgentBrowser.goBack();
+        await waitForAiBrowserLoad(12000);
+      } else if (entry.urlBefore && entry.urlBefore !== "about:blank") {
+        aiAgentBrowser.loadURL(entry.urlBefore);
+        await waitForAiBrowserLoad(12000);
+      } else {
+        throw new Error("Não existe uma página anterior disponível.");
+      }
+    } else if (entry.mode === "wait") {
+      // A espera não altera a página; basta voltar o ciclo para o estado atual.
+    } else {
+      throw new Error("Essa ação não possui uma reversão automática disponível.");
+    }
+
+    aiAgentHistory.pop();
+    aiAgentRejected = [];
+    syncAiUndoButton();
+    setAiAgentStatus("Ação anterior restaurada", "success");
+
+    await waitAi(450);
+    await requestAiAgentProposal(
+      "A última ação aprovada foi voltada pelo usuário. Reavalie o estado atual e proponha novamente a melhor próxima ação."
+    );
+  } catch (error) {
+    setAiAgentStatus("Não consegui voltar a ação", "error");
+    openNoticeModal({
+      eyebrow: "VOLTAR AÇÃO",
+      title: "Não foi possível restaurar automaticamente",
+      description: error?.message || String(error),
+      note:
+        "A ação continua no histórico. Você pode usar o modo Manual para corrigir a página.",
+      confirmLabel: "Entendi",
+    });
+  } finally {
+    aiAgentApprove.disabled = false;
+    aiAgentReject.disabled = false;
+    aiAgentManual.disabled = false;
+    syncAiUndoButton();
+  }
+}
+
 async function executeAiAgentProposal() {
   const proposal = aiAgentProposalState;
 
@@ -2138,9 +2411,13 @@ async function executeAiAgentProposal() {
   aiAgentApprove.disabled = true;
   aiAgentReject.disabled = true;
   aiAgentManual.disabled = true;
+  aiAgentUndo.disabled = true;
   setAiAgentStatus("Executando ação aprovada...", "working");
 
+  let undoEntry = null;
+
   try {
+    undoEntry = await captureAiUndoEntry(proposal);
     await clearAiTargetBubble();
 
     if (proposal.action === "navigate") {
@@ -2236,11 +2513,17 @@ async function executeAiAgentProposal() {
       }
     }
 
+    await waitAi(550);
+
+    if (undoEntry) {
+      await finalizeAiUndoEntry(undoEntry);
+    }
+
     aiAgentRejected = [];
     aiAgentProposalState = null;
     aiAgentProposal.classList.add("is-hidden");
 
-    await waitAi(900);
+    await waitAi(350);
     await requestAiAgentProposal();
   } catch (error) {
     setAiAgentStatus("A ação aprovada falhou", "error");
@@ -2252,6 +2535,7 @@ async function executeAiAgentProposal() {
     aiAgentApprove.disabled = false;
     aiAgentReject.disabled = false;
     aiAgentManual.disabled = false;
+    syncAiUndoButton();
   }
 }
 
@@ -2261,6 +2545,7 @@ function enterAiAgentManualMode() {
   aiAgentManualMode = true;
   aiAgentRequestSerial += 1;
   aiAgentBrowser.classList.remove("is-reviewing");
+  syncAiUndoButton();
   aiAgentProposalState = null;
   aiAgentProposal.classList.add("is-hidden");
   aiAgentManualBar.classList.remove("is-hidden");
@@ -2274,6 +2559,7 @@ async function leaveAiAgentManualMode() {
 
   aiAgentManualMode = false;
   aiAgentBrowser.classList.add("is-reviewing");
+  syncAiUndoButton();
   aiAgentManualBar.classList.add("is-hidden");
   aiAgentRejected = [];
   setAiAgentStatus("Devolvendo controle para a IA...", "working");
@@ -2287,9 +2573,21 @@ async function leaveAiAgentManualMode() {
 async function startAiAgent(action) {
   if (!action?.id) return;
 
+  if (!normalizeAiStartUrlInput(action.startUrl)) {
+    openNoticeModal({
+      eyebrow: "URL INICIAL OBRIGATÓRIA",
+      title: "Essa ação antiga não possui URL inicial",
+      description:
+        "Recadastre a ação informando a URL inicial. A IA só pode iniciar uma execução quando o ponto de partida foi definido por você.",
+      confirmLabel: "Entendi",
+    });
+    return;
+  }
+
   aiAgentAction = action;
   aiAgentProposalState = null;
   aiAgentRejected = [];
+  aiAgentHistory = [];
   aiAgentManualMode = false;
   aiAgentRunning = true;
   aiAgentRequestSerial += 1;
@@ -2301,9 +2599,10 @@ async function startAiAgent(action) {
   aiAgentBrowser.classList.add("is-reviewing");
   aiAgentWorkspace.classList.remove("is-hidden");
   aiAgentWorkspace.closest(".ai-shell")?.classList.add("agent-active");
+  syncAiUndoButton();
   setAiAgentStatus("Abrindo navegador...", "working");
 
-  const initialUrl = action.startUrl || "about:blank";
+  const initialUrl = normalizeAiStartUrlInput(action.startUrl);
   aiBrowserUrl.textContent = initialUrl;
 
   try {
@@ -2336,6 +2635,8 @@ async function closeAiAgent() {
   aiAgentAction = null;
   aiAgentProposalState = null;
   aiAgentRejected = [];
+  aiAgentHistory = [];
+  syncAiUndoButton();
 
   await clearAiTargetBubble();
   aiAgentWorkspace.classList.add("is-hidden");
@@ -2425,7 +2726,32 @@ let aiRequestSerial = 0;
 
 async function sendAiPrompt() {
   const prompt = aiPromptInput.value.trim();
-  if (!prompt || aiBusy) return;
+  const startUrl = normalizeAiStartUrlInput(aiStartUrl.value);
+
+  if (aiBusy) return;
+
+  if (!prompt) {
+    openNoticeModal({
+      eyebrow: "CRIAR COM IA",
+      title: "Descreva o objetivo",
+      description: "Informe o que a automação precisa fazer.",
+      confirmLabel: "Entendi",
+    });
+    return;
+  }
+
+  if (!startUrl) {
+    aiStartUrl.classList.add("is-invalid");
+    openNoticeModal({
+      eyebrow: "URL INICIAL OBRIGATÓRIA",
+      title: "Informe de onde a IA deve começar",
+      description:
+        "Digite uma URL completa usando http:// ou https://. Essa URL será usada exatamente como ponto inicial da execução.",
+      confirmLabel: "Entendi",
+    });
+    aiStartUrl.focus();
+    return;
+  }
 
   const connected = await refreshAiConnectionState();
 
@@ -2449,6 +2775,7 @@ async function sendAiPrompt() {
     const [result] = await Promise.all([
       ipcRenderer.invoke("ai:action:register", {
         instruction: prompt,
+        startUrl,
         effort: aiEffort,
       }),
       new Promise((resolve) => window.setTimeout(resolve, 1100)),
@@ -2473,6 +2800,8 @@ async function sendAiPrompt() {
       aiChatThread.scrollTop = aiChatThread.scrollHeight;
     }, 420);
 
+    aiStartUrl.value = "";
+    syncAiSendAvailability();
     setStatus("Ação cadastrada", "success");
   } catch (error) {
     if (requestId !== aiRequestSerial) return;
@@ -4494,9 +4823,18 @@ qwenSettingsModal.addEventListener("click", (event) => {
   }
 });
 
+aiStartUrl.addEventListener("input", syncAiSendAvailability);
+
+aiStartUrl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    aiPromptInput.focus();
+  }
+});
+
 aiPromptInput.addEventListener("input", () => {
   resizeAiPrompt();
-  aiSendButton.disabled = aiBusy ? false : !aiPromptInput.value.trim();
+  syncAiSendAvailability();
 });
 
 aiPromptInput.addEventListener("keydown", (event) => {
@@ -4519,11 +4857,11 @@ aiPlusButton.addEventListener("click", () => {
   closeAiPromptMenus();
   openNoticeModal({
     eyebrow: "CRIAR COM IA",
-    title: "Contexto do navegador vem na próxima etapa",
+    title: "Fontes adicionais",
     description:
-      "O botão de fontes será usado para anexos, mapa da página atual e outros contextos para a Qwen.",
+      "O navegador com aprovação já está ativo. Este botão será usado depois para anexos e outras fontes extras.",
     note:
-      "Por enquanto, já podemos testar a conversa e o planejamento da automação pela Groq.",
+      "A URL inicial obrigatória já define de onde a IA começa a observar a página.",
     confirmLabel: "Entendi",
   });
 });
@@ -4574,6 +4912,10 @@ document.addEventListener("pointerdown", (event) => {
 
 aiAgentClose.addEventListener("click", () => {
   void closeAiAgent();
+});
+
+aiAgentUndo.addEventListener("click", () => {
+  void undoAiAgentLastAction();
 });
 
 aiAgentApprove.addEventListener("click", () => {
