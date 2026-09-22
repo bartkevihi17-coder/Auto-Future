@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { BrowserRecorder } from "./automation/recorder";
-import { callQwen, QwenRegion } from "./ai/qwen";
+import { callQwen, QwenMessage } from "./ai/qwen";
 import { runRecording, RunProgressEvent } from "./automation/runner";
 import {
   getBrowserProfileStatus,
@@ -85,45 +85,35 @@ function normalizeNotifications(value: unknown): boolean {
 }
 
 interface StoredAiSettings {
-  provider: "qwen";
-  region: QwenRegion;
+  provider: "groq";
   model: string;
   baseUrl: string;
   encryptedApiKey?: string;
   updatedAt?: string;
 }
 
-const QWEN_REGION_BASE_URLS: Record<QwenRegion, string> = {
-  us: "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
-  singapore: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-};
-
-const DEFAULT_QWEN_MODEL = "qwen3.8-flash";
-
-function normalizeQwenRegion(value: unknown): QwenRegion {
-  return value === "singapore" ? "singapore" : "us";
-}
-
-function qwenBaseUrlForRegion(region: QwenRegion): string {
-  return QWEN_REGION_BASE_URLS[region];
-}
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const DEFAULT_QWEN_MODEL = "qwen/qwen3.8-27b";
 
 function normalizeQwenModel(value: unknown): string {
   const model = String(value ?? "").trim();
-  return model || DEFAULT_QWEN_MODEL;
+
+  if (!model || !model.includes("/")) {
+    return DEFAULT_QWEN_MODEL;
+  }
+
+  return model;
 }
 
 async function readAiSettings(): Promise<StoredAiSettings> {
   try {
     const raw = await fs.readFile(aiSettingsPath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<StoredAiSettings>;
-    const region = normalizeQwenRegion(parsed.region);
 
     return {
-      provider: "qwen",
-      region,
+      provider: "groq",
       model: normalizeQwenModel(parsed.model),
-      baseUrl: qwenBaseUrlForRegion(region),
+      baseUrl: GROQ_BASE_URL,
       encryptedApiKey:
         typeof parsed.encryptedApiKey === "string"
           ? parsed.encryptedApiKey
@@ -133,10 +123,9 @@ async function readAiSettings(): Promise<StoredAiSettings> {
     };
   } catch {
     return {
-      provider: "qwen",
-      region: "us",
+      provider: "groq",
       model: DEFAULT_QWEN_MODEL,
-      baseUrl: qwenBaseUrlForRegion("us"),
+      baseUrl: GROQ_BASE_URL,
     };
   }
 }
@@ -151,7 +140,7 @@ async function writeAiSettings(settings: StoredAiSettings): Promise<void> {
 }
 
 function decryptStoredApiKey(settings: StoredAiSettings): string {
-  const fromEnv = process.env.DASHSCOPE_API_KEY?.trim();
+  const fromEnv = process.env.GROQ_API_KEY?.trim();
 
   if (fromEnv) return fromEnv;
   if (!settings.encryptedApiKey) return "";
@@ -170,13 +159,12 @@ function publicAiSettings(settings: StoredAiSettings) {
   const apiKey = decryptStoredApiKey(settings);
 
   return {
-    provider: "qwen",
-    region: settings.region,
+    provider: "groq",
     model: settings.model,
     baseUrl: settings.baseUrl,
     configured: Boolean(apiKey),
     secureStorageAvailable: safeStorage.isEncryptionAvailable(),
-    keySource: process.env.DASHSCOPE_API_KEY?.trim()
+    keySource: process.env.GROQ_API_KEY?.trim()
       ? "environment"
       : apiKey
         ? "encrypted-local"
@@ -186,19 +174,16 @@ function publicAiSettings(settings: StoredAiSettings) {
 }
 
 async function saveQwenSettings(payload: {
-  region?: QwenRegion;
   model?: string;
   apiKey?: string;
 }): Promise<StoredAiSettings> {
   const current = await readAiSettings();
-  const region = normalizeQwenRegion(payload.region);
   const apiKey = String(payload.apiKey ?? "").trim();
 
   const next: StoredAiSettings = {
-    provider: "qwen",
-    region,
+    provider: "groq",
     model: normalizeQwenModel(payload.model),
-    baseUrl: qwenBaseUrlForRegion(region),
+    baseUrl: GROQ_BASE_URL,
     encryptedApiKey: current.encryptedApiKey,
     updatedAt: new Date().toISOString(),
   };
@@ -229,7 +214,7 @@ async function getQwenClientSettings(): Promise<{
 
   if (!apiKey) {
     throw new Error(
-      "Configure uma chave da API Qwen antes de testar a conexao."
+      "Configure uma chave da Groq antes de testar a Qwen."
     );
   }
 
@@ -777,7 +762,6 @@ app.whenReady().then(async () => {
     async (
       _event,
       payload: {
-        region?: QwenRegion;
         model?: string;
         apiKey?: string;
       }
@@ -797,7 +781,7 @@ app.whenReady().then(async () => {
         {
           role: "system",
           content:
-            "Voce esta conectado ao Auto Future. Responda de forma curta e objetiva.",
+            "Voce e a Qwen executando pela Groq dentro do Auto Future. Responda de forma curta e objetiva.",
         },
         {
           role: "user",
@@ -828,6 +812,8 @@ app.whenReady().then(async () => {
       payload: {
         prompt?: string;
         systemPrompt?: string;
+        history?: QwenMessage[];
+        effort?: string;
       }
     ) => {
       const prompt = String(payload?.prompt || "").trim();
@@ -837,6 +823,19 @@ app.whenReady().then(async () => {
       }
 
       const settings = await getQwenClientSettings();
+      const history = Array.isArray(payload?.history)
+        ? payload.history
+            .filter(
+              (message): message is QwenMessage =>
+                Boolean(message) &&
+                (message.role === "user" || message.role === "assistant") &&
+                typeof message.content === "string"
+            )
+            .slice(-16)
+        : [];
+
+      const effort = String(payload?.effort || "Médio").trim();
+
       const result = await callQwen(
         settings,
         [
@@ -844,8 +843,14 @@ app.whenReady().then(async () => {
             role: "system",
             content:
               String(payload?.systemPrompt || "").trim() ||
-              "Voce e o planejador de automacoes do Auto Future. Responda em portugues do Brasil.",
+              (
+                "Voce e a IA do Auto Future, especializada em planejar automacoes de navegador. " +
+                "Responda em portugues do Brasil. Nivel de raciocinio solicitado: " +
+                effort +
+                ". Quando o usuario pedir uma automacao, descreva passos claros que depois possam ser convertidos em acoes do navegador."
+              ),
           },
+          ...history,
           {
             role: "user",
             content: prompt,
@@ -853,8 +858,8 @@ app.whenReady().then(async () => {
         ],
         {
           temperature: 0.15,
-          maxTokens: 900,
-          timeoutMs: 40_000,
+          maxTokens: 1400,
+          timeoutMs: 45_000,
         }
       );
 

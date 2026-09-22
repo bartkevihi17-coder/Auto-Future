@@ -557,6 +557,85 @@
           </div>
         </section>
 
+        <section class="page ai-page" data-page-view="ai">
+          <div class="ai-shell">
+            <div class="ai-page-head">
+              <div>
+                <p class="eyebrow">AUTO FUTURE I.A.</p>
+                <h1>Criar com IA</h1>
+                <p>Explique o que a automação precisa fazer. Nesta primeira versão, a Qwen já planeja os passos; o próximo estágio liga esse plano ao navegador ao vivo.</p>
+              </div>
+              <div class="ai-connection-pill">
+                <span class="ai-connection-dot"></span>
+                <span id="ai-connection-label">Verificando Qwen...</span>
+              </div>
+            </div>
+
+            <div id="ai-chat-thread" class="ai-chat-thread">
+              <div id="ai-empty-state" class="ai-empty-state">
+                <div class="ai-orb" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 3.5c1.1 3.4 2.8 5.1 6.5 6.2-3.7 1.1-5.4 2.8-6.5 6.3-1.1-3.5-2.8-5.2-6.5-6.3C9.2 8.6 10.9 6.9 12 3.5Z"/><path d="M18.3 14.5c.5 1.6 1.3 2.4 3 2.9-1.7.5-2.5 1.3-3 2.9-.5-1.6-1.3-2.4-3-2.9 1.7-.5 2.5-1.3 3-2.9Z"/></svg>
+                </div>
+                <h2>O que vamos automatizar?</h2>
+                <p>Exemplo: “Abra o Gmail, vá até a lixeira, libere espaço e volte para a caixa de entrada.”</p>
+              </div>
+            </div>
+
+            <div class="ai-prompt-wrap">
+              <div id="ai-prompt-bar" class="prompt-bar" data-busy="false">
+                <div id="ai-model-menu" class="prompt-bar__menu ai-prompt-menu is-hidden" data-kind="model">
+                  <button class="prompt-bar__row is-selected" type="button" data-ai-model="qwen/qwen3.8-27b">
+                    <span class="prompt-bar__row-name">Qwen 3.8 27B</span>
+                    <span class="prompt-bar__row-tag">Groq</span>
+                    <span class="prompt-bar__row-check">✓</span>
+                  </button>
+                </div>
+
+                <div id="ai-effort-menu" class="prompt-bar__menu ai-prompt-menu is-hidden" data-kind="effort">
+                  <div class="prompt-bar__effort-head">
+                    <span class="prompt-bar__effort-title">Raciocínio</span>
+                    <strong id="ai-effort-label">Médio</strong>
+                  </div>
+                  <div class="ai-effort-options">
+                    <button type="button" data-effort="Baixo">Baixo</button>
+                    <button type="button" class="active" data-effort="Médio">Médio</button>
+                    <button type="button" data-effort="Alto">Alto</button>
+                    <button type="button" data-effort="Máximo">Máximo</button>
+                  </div>
+                </div>
+
+                <div class="prompt-bar__field">
+                  <textarea id="ai-prompt-input" class="prompt-bar__input" rows="1" placeholder="Descreva a automação que você quer criar..." aria-label="Prompt da IA"></textarea>
+
+                  <div class="prompt-bar__bar">
+                    <button id="ai-plus-button" type="button" class="prompt-bar__tool" aria-label="Fontes e anexos" title="Em breve: anexos e contexto da página">
+                      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                    </button>
+
+                    <button id="ai-model-button" type="button" class="prompt-bar__pick" aria-expanded="false">
+                      <span>Qwen 3.8 27B</span>
+                      <svg viewBox="0 0 24 24"><path d="m7 9 5 5 5-5"/></svg>
+                    </button>
+
+                    <button id="ai-effort-button" type="button" class="prompt-bar__pick" aria-expanded="false">
+                      <svg viewBox="0 0 24 24"><path d="M12 3.5c1.1 3.4 2.8 5.1 6.5 6.2-3.7 1.1-5.4 2.8-6.5 6.3-1.1-3.5-2.8-5.2-6.5-6.3C9.2 8.6 10.9 6.9 12 3.5Z"/></svg>
+                      <span id="ai-effort-button-label">Médio</span>
+                    </button>
+
+                    <span class="prompt-bar__spacer"></span>
+
+                    <button id="ai-send-button" type="button" class="prompt-bar__send" aria-label="Enviar" disabled>
+                      <svg class="prompt-bar__glyph prompt-bar__glyph--send" viewBox="0 0 24 24"><path d="M12 4.5 18.5 11H14v8.5h-4V11H5.5Z"/></svg>
+                      <svg class="prompt-bar__glyph prompt-bar__glyph--stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <small class="ai-prompt-hint">Qwen via Groq · a IA ainda não controla o navegador nesta etapa.</small>
+            </div>
+          </div>
+        </section>
+
         <section class="page" data-page-view="runs">
           <div class="page-heading compact-heading">
             <div>
@@ -603,9 +682,9 @@
             <span class="dock-nav-label">Agenda</span>
           </button>
 
-          <button class="rubber-segment__item dock-nav-item" type="button" role="radio" aria-checked="false" data-page="runs" aria-label="Histórico">
-            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M12 7v5l3 2"/></svg></span>
-            <span class="dock-nav-label">Histórico</span>
+          <button class="rubber-segment__item dock-nav-item" type="button" role="radio" aria-checked="false" data-page="ai" aria-label="I.A.">
+            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><path d="M12 3.2c1.2 3.6 3 5.4 6.8 6.6-3.8 1.2-5.6 3-6.8 6.7-1.2-3.7-3-5.5-6.8-6.7 3.8-1.2 5.6-3 6.8-6.6Z"/><path d="M18.3 14.4c.5 1.7 1.4 2.5 3.1 3-1.7.5-2.6 1.4-3.1 3.1-.5-1.7-1.4-2.6-3.1-3.1 1.7-.5 2.6-1.3 3.1-3Z"/></svg></span>
+            <span class="dock-nav-label">I.A.</span>
           </button>
         </div>
 
@@ -650,7 +729,7 @@
             <div class="profile-ai-status">
               <div>
                 <span>IA</span>
-                <strong>Qwen</strong>
+                <strong>Qwen · Groq</strong>
               </div>
               <span id="profile-qwen-status" class="profile-ai-status__badge">Não configurada</span>
             </div>
@@ -668,25 +747,17 @@
           <div class="qwen-settings-logo">Q</div>
           <div class="modal-copy">
             <p class="eyebrow">INTELIGÊNCIA ARTIFICIAL</p>
-            <h3 id="qwen-settings-title">Conectar Qwen</h3>
+            <h3 id="qwen-settings-title">Conectar Qwen via Groq</h3>
             <p>
-              Esta é a primeira etapa do modo “Criar com IA”. A chave fica criptografada localmente no seu computador.
+              Use a chave criada em console.groq.com. Ela fica criptografada localmente no seu computador.
             </p>
           </div>
         </div>
 
         <div class="qwen-settings-grid">
-          <label class="field">
-            <span>Região da chave</span>
-            <select id="qwen-region">
-              <option value="us">Estados Unidos · Virgínia</option>
-              <option value="singapore">Singapura · Internacional</option>
-            </select>
-          </label>
-
-          <label class="field">
+          <label class="field qwen-model-field">
             <span>Modelo</span>
-            <input id="qwen-model" type="text" value="qwen3.8-flash" autocomplete="off" spellcheck="false" />
+            <input id="qwen-model" type="text" value="qwen/qwen3.8-27b" autocomplete="off" spellcheck="false" />
           </label>
 
           <label class="field qwen-key-field">
@@ -699,7 +770,7 @@
         <div id="qwen-test-result" class="qwen-test-result is-hidden" role="status"></div>
 
         <div class="modal-note qwen-settings-note">
-          Para o primeiro teste usamos a interface compatível com OpenAI do Alibaba Cloud Model Studio. Depois disso, o próximo passo é conectar a Qwen ao mapa da página do navegador.
+          A conexão usa a API compatível com OpenAI da Groq. Depois do teste, o próximo passo é conectar a Qwen ao mapa da página do navegador.
         </div>
 
         <div class="modal-actions">

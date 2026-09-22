@@ -189,13 +189,26 @@ const profileQwenSettingsButton = document.querySelector("#profile-qwen-settings
 const profileLogoutButton = document.querySelector("#profile-logout-button");
 
 const qwenSettingsModal = document.querySelector("#qwen-settings-modal");
-const qwenRegion = document.querySelector("#qwen-region");
 const qwenModel = document.querySelector("#qwen-model");
 const qwenApiKey = document.querySelector("#qwen-api-key");
 const qwenKeyHint = document.querySelector("#qwen-key-hint");
 const qwenTestResult = document.querySelector("#qwen-test-result");
 const qwenSettingsCancel = document.querySelector("#qwen-settings-cancel");
 const qwenSettingsSaveTest = document.querySelector("#qwen-settings-save-test");
+
+const aiChatThread = document.querySelector("#ai-chat-thread");
+const aiEmptyState = document.querySelector("#ai-empty-state");
+const aiConnectionLabel = document.querySelector("#ai-connection-label");
+const aiPromptBar = document.querySelector("#ai-prompt-bar");
+const aiPromptInput = document.querySelector("#ai-prompt-input");
+const aiSendButton = document.querySelector("#ai-send-button");
+const aiPlusButton = document.querySelector("#ai-plus-button");
+const aiModelButton = document.querySelector("#ai-model-button");
+const aiEffortButton = document.querySelector("#ai-effort-button");
+const aiEffortButtonLabel = document.querySelector("#ai-effort-button-label");
+const aiModelMenu = document.querySelector("#ai-model-menu");
+const aiEffortMenu = document.querySelector("#ai-effort-menu");
+const aiEffortLabel = document.querySelector("#ai-effort-label");
 
 const rubberTrack = document.querySelector(".rubber-segment");
 const rubberThumb = document.querySelector(".rubber-segment__thumb");
@@ -224,6 +237,9 @@ let currentUser = null;
 let editorSearchQuery = "";
 let editorTagFilterValue = "";
 let editorSortMode = "default";
+let aiBusy = false;
+let aiEffort = "Médio";
+const aiMessages = [];
 const activeFolderBySurface = {
   editor: null,
   recordings: null,
@@ -242,6 +258,7 @@ const pageNames = {
   execution: "Execução",
   recordings: "Gravações",
   schedules: "Agendamentos",
+  ai: "I.A.",
   runs: "Histórico",
 };
 
@@ -388,6 +405,8 @@ function openPage(name, options = {}) {
     void refreshRecordings();
   } else if (name === "schedules") {
     void Promise.all([refreshRecordings(), refreshSchedules()]);
+  } else if (name === "ai") {
+    void refreshAiConnectionState();
   } else if (name === "runs") {
     void refreshRuns();
   }
@@ -1480,13 +1499,12 @@ async function openQwenSettingsModal() {
   try {
     const settings = await ipcRenderer.invoke("ai:qwen:get-settings");
 
-    qwenRegion.value = settings?.region || "us";
-    qwenModel.value = settings?.model || "qwen3.8-flash";
+    qwenModel.value = settings?.model || "qwen/qwen3.8-27b";
 
     qwenKeyHint.textContent = settings?.configured
-      ? "Já existe uma chave salva. Deixe em branco para mantê-la."
+      ? "Já existe uma chave Groq salva. Deixe em branco para mantê-la."
       : settings?.secureStorageAvailable
-        ? "A chave será criptografada localmente pelo sistema."
+        ? "Cole a chave criada em console.groq.com. Ela será criptografada localmente."
         : "O armazenamento seguro não está disponível neste computador.";
 
     renderQwenProfileStatus(settings);
@@ -1506,12 +1524,12 @@ async function saveAndTestQwen() {
 
   try {
     const saved = await ipcRenderer.invoke("ai:qwen:save-settings", {
-      region: qwenRegion.value,
       model: qwenModel.value,
       apiKey: qwenApiKey.value,
     });
 
     renderQwenProfileStatus(saved);
+    await refreshAiConnectionState();
 
     const result = await ipcRenderer.invoke("ai:qwen:test");
     const latency = Number(result?.latencyMs) || 0;
@@ -1540,6 +1558,154 @@ async function saveAndTestQwen() {
     qwenSettingsCancel.disabled = false;
     qwenSettingsSaveTest.textContent = "Salvar e testar";
   }
+}
+
+async function refreshAiConnectionState() {
+  try {
+    const settings = await ipcRenderer.invoke("ai:qwen:get-settings");
+    const connected = settings?.configured === true;
+
+    aiConnectionLabel.textContent = connected
+      ? "Qwen 3.8 27B · Groq"
+      : "Configure sua chave Groq";
+
+    aiConnectionLabel.parentElement?.classList.toggle("is-connected", connected);
+    aiPromptBar.classList.toggle("is-disconnected", !connected);
+    renderQwenProfileStatus(settings);
+    return connected;
+  } catch {
+    aiConnectionLabel.textContent = "Qwen indisponível";
+    aiConnectionLabel.parentElement?.classList.remove("is-connected");
+    aiPromptBar.classList.add("is-disconnected");
+    return false;
+  }
+}
+
+function closeAiPromptMenus() {
+  aiModelMenu.classList.add("is-hidden");
+  aiEffortMenu.classList.add("is-hidden");
+  aiModelButton.setAttribute("aria-expanded", "false");
+  aiEffortButton.setAttribute("aria-expanded", "false");
+}
+
+function resizeAiPrompt() {
+  aiPromptInput.style.height = "0px";
+  const maxHeight = 22 * 5;
+  aiPromptInput.style.height =
+    Math.min(aiPromptInput.scrollHeight, maxHeight) + "px";
+  aiPromptInput.style.overflowY =
+    aiPromptInput.scrollHeight > maxHeight ? "auto" : "hidden";
+}
+
+function setAiBusy(busy) {
+  aiBusy = busy;
+  aiPromptBar.dataset.busy = busy ? "true" : "false";
+  aiSendButton.classList.toggle("is-busy", busy);
+  aiSendButton.disabled = busy ? false : !aiPromptInput.value.trim();
+  aiPromptInput.disabled = busy;
+}
+
+function appendAiMessage(role, content) {
+  aiEmptyState.classList.add("is-hidden");
+
+  const row = document.createElement("div");
+  row.className = "ai-message ai-message--" + role;
+
+  const bubble = document.createElement("div");
+  bubble.className = "ai-message__bubble";
+
+  if (role === "assistant") {
+    const badge = document.createElement("span");
+    badge.className = "ai-message__badge";
+    badge.textContent = "Q";
+    bubble.appendChild(badge);
+  }
+
+  const text = document.createElement("div");
+  text.className = "ai-message__text";
+  text.textContent = content;
+  bubble.appendChild(text);
+  row.appendChild(bubble);
+  aiChatThread.appendChild(row);
+  aiChatThread.scrollTop = aiChatThread.scrollHeight;
+}
+
+let aiRequestSerial = 0;
+
+async function sendAiPrompt() {
+  const prompt = aiPromptInput.value.trim();
+  if (!prompt || aiBusy) return;
+
+  const connected = await refreshAiConnectionState();
+
+  if (!connected) {
+    openQwenSettingsModal();
+    return;
+  }
+
+  const history = aiMessages.slice(-14);
+  aiMessages.push({ role: "user", content: prompt });
+  appendAiMessage("user", prompt);
+
+  aiPromptInput.value = "";
+  resizeAiPrompt();
+  closeAiPromptMenus();
+
+  const requestId = ++aiRequestSerial;
+  setAiBusy(true);
+
+  try {
+    const result = await ipcRenderer.invoke("ai:qwen:chat", {
+      prompt,
+      history,
+      effort: aiEffort,
+    });
+
+    if (requestId !== aiRequestSerial) return;
+
+    const answer = String(result?.content || "").trim();
+
+    if (!answer) {
+      throw new Error("A Qwen respondeu sem conteúdo.");
+    }
+
+    aiMessages.push({ role: "assistant", content: answer });
+    appendAiMessage("assistant", answer);
+  } catch (error) {
+    if (requestId !== aiRequestSerial) return;
+
+    const message = error?.message || String(error);
+    appendAiMessage("assistant", "Erro ao chamar a Qwen: " + message);
+
+    if (message.includes("401")) {
+      openNoticeModal({
+        eyebrow: "GROQ · AUTENTICAÇÃO",
+        title: "A chave da Groq foi recusada",
+        description:
+          "Confira se a chave foi criada em console.groq.com/keys e salve novamente em Perfil → Configurar IA.",
+        note:
+          "O Auto Future agora usa diretamente https://api.groq.com/openai/v1.",
+        confirmLabel: "Entendi",
+      });
+    }
+  } finally {
+    if (requestId === aiRequestSerial) {
+      setAiBusy(false);
+      aiPromptInput.focus();
+    }
+  }
+}
+
+function stopAiPrompt() {
+  if (!aiBusy) return;
+
+  aiRequestSerial += 1;
+  setAiBusy(false);
+  const interrupted =
+    "Resposta interrompida. A chamada pode terminar em segundo plano, mas será ignorada.";
+  aiMessages.push({ role: "assistant", content: interrupted });
+  appendAiMessage("assistant", interrupted);
+  aiPromptInput.focus();
 }
 
 function renderFolderCard(folder, surface) {
@@ -3518,6 +3684,84 @@ qwenSettingsSaveTest.addEventListener("click", () => {
 qwenSettingsModal.addEventListener("click", (event) => {
   if (event.target === qwenSettingsModal) {
     closeQwenSettingsModal();
+  }
+});
+
+aiPromptInput.addEventListener("input", () => {
+  resizeAiPrompt();
+  aiSendButton.disabled = aiBusy ? false : !aiPromptInput.value.trim();
+});
+
+aiPromptInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    void sendAiPrompt();
+  }
+});
+
+aiSendButton.addEventListener("click", () => {
+  if (aiBusy) {
+    stopAiPrompt();
+    return;
+  }
+
+  void sendAiPrompt();
+});
+
+aiPlusButton.addEventListener("click", () => {
+  closeAiPromptMenus();
+  openNoticeModal({
+    eyebrow: "CRIAR COM IA",
+    title: "Contexto do navegador vem na próxima etapa",
+    description:
+      "O botão de fontes será usado para anexos, mapa da página atual e outros contextos para a Qwen.",
+    note:
+      "Por enquanto, já podemos testar a conversa e o planejamento da automação pela Groq.",
+    confirmLabel: "Entendi",
+  });
+});
+
+aiModelButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const opening = aiModelMenu.classList.contains("is-hidden");
+  closeAiPromptMenus();
+  aiModelMenu.classList.toggle("is-hidden", !opening);
+  aiModelButton.setAttribute("aria-expanded", opening ? "true" : "false");
+});
+
+aiModelMenu.querySelectorAll("[data-ai-model]").forEach((button) => {
+  button.addEventListener("click", () => {
+    closeAiPromptMenus();
+    aiPromptInput.focus();
+  });
+});
+
+aiEffortButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const opening = aiEffortMenu.classList.contains("is-hidden");
+  closeAiPromptMenus();
+  aiEffortMenu.classList.toggle("is-hidden", !opening);
+  aiEffortButton.setAttribute("aria-expanded", opening ? "true" : "false");
+});
+
+aiEffortMenu.querySelectorAll("[data-effort]").forEach((button) => {
+  button.addEventListener("click", () => {
+    aiEffort = button.dataset.effort || "Médio";
+    aiEffortLabel.textContent = aiEffort;
+    aiEffortButtonLabel.textContent = aiEffort;
+
+    aiEffortMenu.querySelectorAll("[data-effort]").forEach((item) => {
+      item.classList.toggle("active", item === button);
+    });
+
+    closeAiPromptMenus();
+    aiPromptInput.focus();
+  });
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!aiPromptBar.contains(event.target)) {
+    closeAiPromptMenus();
   }
 });
 
