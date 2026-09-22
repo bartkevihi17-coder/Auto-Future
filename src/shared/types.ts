@@ -10,6 +10,10 @@ export interface AutomationAction {
   selector?: string;
   value?: string;
   isSecret?: boolean;
+  frameUrl?: string;
+  frameName?: string;
+  x?: number;
+  y?: number;
 }
 
 export interface AutomationRecording {

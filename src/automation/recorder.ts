@@ -7,6 +7,15 @@ import { prepareBrowserProfile } from "./browser-profile";
 
 type EventSink = (action: AutomationAction) => void;
 
+export interface UnsupportedPageInfo {
+  url: string;
+  title?: string;
+  reason: "capture-unavailable" | "opaque-content" | "product-editor-unreadable" | "page-crashed";
+  details: string;
+}
+
+type UnsupportedSink = (info: UnsupportedPageInfo) => void;
+
 export class BrowserRecorder {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
@@ -14,11 +23,14 @@ export class BrowserRecorder {
   private lastTimestamp = 0;
   private browserName = "Chromium";
   private browserFirstUse = false;
+  private readabilityTimer: ReturnType<typeof setTimeout> | null = null;
+  private unsupportedTriggered = false;
 
   constructor(
     private readonly videoDir: string,
     private readonly browserProfileDir: string,
-    private readonly onAction?: EventSink
+    private readonly onAction?: EventSink,
+    private readonly onUnsupported?: UnsupportedSink
   ) {}
 
   async start(initialUrl: string, name = "Nova automacao"): Promise<AutomationRecording> {
@@ -31,6 +43,7 @@ export class BrowserRecorder {
     const preparedProfile = await prepareBrowserProfile(this.browserProfileDir);
     this.browserName = preparedProfile.browserName;
     this.browserFirstUse = preparedProfile.firstUse;
+    this.unsupportedTriggered = false;
 
     const launchArgs = [
       "--no-first-run",
@@ -83,23 +96,46 @@ export class BrowserRecorder {
 
     this.lastTimestamp = Date.now();
 
-    await this.context.exposeBinding("__autoFutureRecord", async (_source, payload: unknown) => {
+    await this.context.exposeBinding("__autoFutureRecord", async (source, payload: unknown) => {
       if (!payload || typeof payload !== "object") return;
-      const data = payload as { type?: string; selector?: string; value?: string; url?: string; isSecret?: boolean };
+
+      const data = payload as {
+        type?: string;
+        selector?: string;
+        value?: string;
+        url?: string;
+        isSecret?: boolean;
+        x?: number;
+        y?: number;
+      };
+
       if (data.type !== "click" && data.type !== "input") return;
 
       this.recordAction({
         type: data.type,
         selector: data.selector,
         value: data.value,
-        url: data.url ?? this.page?.url() ?? initialUrl,
+        url: data.url ?? source.frame.url() ?? this.page?.url() ?? initialUrl,
         isSecret: Boolean(data.isSecret),
+        frameUrl: source.frame.url(),
+        frameName: source.frame.name() || undefined,
+        x: Number.isFinite(data.x) ? Number(data.x) : undefined,
+        y: Number.isFinite(data.y) ? Number(data.y) : undefined,
       });
     });
 
     await this.context.addInitScript({
       content: `
 (() => {
+  window.__autoFutureRecorderReady = true;
+
+  const eventTarget = (event) => {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const candidate = path.find((item) => item instanceof Element);
+    if (candidate instanceof Element) return candidate;
+    return event.target instanceof Element ? event.target : null;
+  };
+
   const cssEscape = (value) => {
     if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
     return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\\\$&");
@@ -108,8 +144,11 @@ export class BrowserRecorder {
   const selectorFor = (element) => {
     if (!(element instanceof Element)) return "";
 
-    const testId = element.getAttribute("data-testid");
-    if (testId) return '[data-testid="' + String(testId).replace(/"/g, '\\\\"') + '"]';
+    const testId = element.getAttribute("data-testid") || element.getAttribute("data-test");
+    if (testId) {
+      const attr = element.hasAttribute("data-testid") ? "data-testid" : "data-test";
+      return "[" + attr + "=\\\"" + String(testId).replace(/"/g, '\\\\"') + "\\"]";
+    }
 
     if (element.id) return "#" + cssEscape(element.id);
 
@@ -117,6 +156,18 @@ export class BrowserRecorder {
     if (name) {
       const byName = element.tagName.toLowerCase() + '[name="' + String(name).replace(/"/g, '\\\\"') + '"]';
       if (document.querySelectorAll(byName).length === 1) return byName;
+    }
+
+    const ariaLabel = element.getAttribute("aria-label");
+    if (ariaLabel) {
+      const byAria = '[aria-label="' + String(ariaLabel).replace(/"/g, '\\\\"') + '"]';
+      if (document.querySelectorAll(byAria).length === 1) return byAria;
+    }
+
+    const placeholder = element.getAttribute("placeholder");
+    if (placeholder) {
+      const byPlaceholder = element.tagName.toLowerCase() + '[placeholder="' + String(placeholder).replace(/"/g, '\\\\"') + '"]';
+      if (document.querySelectorAll(byPlaceholder).length === 1) return byPlaceholder;
     }
 
     const text = (element.textContent || "").trim().replace(/\\s+/g, " ");
@@ -149,6 +200,19 @@ export class BrowserRecorder {
     return parts.join(" > ");
   };
 
+  const pointFor = (element, event) => {
+    if (event && typeof event.clientX === "number" && typeof event.clientY === "number" && (event.clientX !== 0 || event.clientY !== 0)) {
+      return { x: event.clientX, y: event.clientY };
+    }
+
+    if (element instanceof Element) {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    return {};
+  };
+
   const send = (payload) => {
     const fn = window.__autoFutureRecord;
     if (typeof fn === "function") {
@@ -157,13 +221,13 @@ export class BrowserRecorder {
   };
 
   document.addEventListener("click", (event) => {
-    const target = event.target instanceof Element ? event.target : null;
+    const target = eventTarget(event);
     if (!target) return;
-    send({ type: "click", selector: selectorFor(target) });
+    send({ type: "click", selector: selectorFor(target), ...pointFor(target, event) });
   }, true);
 
   document.addEventListener("change", (event) => {
-    const target = event.target;
+    const target = eventTarget(event);
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
 
     const isSecret = target instanceof HTMLInputElement && target.type === "password";
@@ -171,7 +235,8 @@ export class BrowserRecorder {
       type: "input",
       selector: selectorFor(target),
       value: isSecret ? "" : target.value,
-      isSecret
+      isSecret,
+      ...pointFor(target)
     });
   }, true);
 })();
@@ -190,10 +255,20 @@ export class BrowserRecorder {
       const url = frame.url();
       if (!url || url === "about:blank") return;
       this.recordAction({ type: "navigate", url });
+      this.scheduleReadabilityCheck(2500, 0);
+    });
+
+    this.page.on("crash", () => {
+      void this.abortForUnsupportedPage({
+        url: this.page?.url() || initialUrl,
+        reason: "page-crashed",
+        details: "A aba do navegador travou enquanto o Auto Future tentava acompanhar a pagina.",
+      });
     });
 
     try {
       await this.page.goto(initialUrl, { waitUntil: "domcontentloaded" });
+      this.scheduleReadabilityCheck(2500, 0);
     } catch (error) {
       await this.context.close().catch(() => undefined);
       this.context = null;
@@ -209,6 +284,8 @@ export class BrowserRecorder {
     if (!this.recording) {
       throw new Error("Nao existe gravacao em andamento.");
     }
+
+    this.clearReadabilityTimer();
 
     const finished = this.recording;
     const video = this.page?.video();
@@ -246,9 +323,171 @@ export class BrowserRecorder {
     };
   }
 
+  private clearReadabilityTimer(): void {
+    if (this.readabilityTimer) {
+      clearTimeout(this.readabilityTimer);
+      this.readabilityTimer = null;
+    }
+  }
+
+  private scheduleReadabilityCheck(delayMs: number, attempt: number): void {
+    this.clearReadabilityTimer();
+
+    this.readabilityTimer = setTimeout(() => {
+      this.readabilityTimer = null;
+      void this.inspectReadability(attempt);
+    }, delayMs);
+  }
+
+  private async inspectReadability(attempt: number): Promise<void> {
+    const page = this.page;
+
+    if (!page || !this.recording || this.unsupportedTriggered || page.isClosed()) return;
+
+    const url = page.url();
+    if (!url || url === "about:blank") return;
+
+    const probes: Array<{
+      url: string;
+      ready: boolean;
+      textLength: number;
+      interactiveCount: number;
+      formControlCount: number;
+      elementCount: number;
+      canvasCount: number;
+    }> = [];
+
+    for (const frame of page.frames()) {
+      try {
+        const probe = await frame.evaluate(() => {
+          const body = document.body;
+          const text = (body?.innerText || "").trim();
+          const interactive =
+            "a[href],button,input,select,textarea,[contenteditable='true'],[role='button'],[role='link'],[role='textbox']";
+
+          return {
+            ready: Boolean(
+              (window as unknown as { __autoFutureRecorderReady?: boolean })
+                .__autoFutureRecorderReady
+            ),
+            textLength: text.length,
+            interactiveCount: document.querySelectorAll(interactive).length,
+            formControlCount: document.querySelectorAll(
+              "input,select,textarea,[contenteditable='true']"
+            ).length,
+            elementCount: body?.querySelectorAll("*").length || 0,
+            canvasCount: document.querySelectorAll("canvas").length,
+          };
+        });
+
+        probes.push({
+          url: frame.url(),
+          ...probe,
+        });
+      } catch {
+        probes.push({
+          url: frame.url(),
+          ready: false,
+          textLength: 0,
+          interactiveCount: 0,
+          formControlCount: 0,
+          elementCount: 0,
+          canvasCount: 0,
+        });
+      }
+    }
+
+    const totals = probes.reduce(
+      (sum, probe) => ({
+        readyFrames: sum.readyFrames + (probe.ready ? 1 : 0),
+        textLength: sum.textLength + probe.textLength,
+        interactiveCount: sum.interactiveCount + probe.interactiveCount,
+        formControlCount: sum.formControlCount + probe.formControlCount,
+        elementCount: sum.elementCount + probe.elementCount,
+        canvasCount: sum.canvasCount + probe.canvasCount,
+      }),
+      {
+        readyFrames: 0,
+        textLength: 0,
+        interactiveCount: 0,
+        formControlCount: 0,
+        elementCount: 0,
+        canvasCount: 0,
+      }
+    );
+
+    const isSigeProductEditor =
+      /enfoquepapelaria\.meusige\.com\.br\/sistema\/Produtos\/Edit\//i.test(url);
+
+    let reason: UnsupportedPageInfo["reason"] | null = null;
+    let details = "";
+
+    if (totals.readyFrames === 0) {
+      reason = "capture-unavailable";
+      details =
+        "O script de captura nao conseguiu acessar nenhum frame da pagina. " +
+        "Isso normalmente acontece quando o conteudo esta isolado ou protegido.";
+    } else if (
+      totals.textLength < 8 &&
+      totals.interactiveCount === 0 &&
+      totals.elementCount < 8
+    ) {
+      reason = "opaque-content";
+      details =
+        "A pagina foi exibida, mas nao apresentou DOM utilizavel para leitura e gravacao. " +
+        "Ela pode estar sendo desenhada em canvas, WebView ou outra camada opaca.";
+    } else if (isSigeProductEditor && totals.formControlCount < 2) {
+      reason = "product-editor-unreadable";
+      details =
+        "O editor de produto do SIGE abriu, mas os campos do cadastro nao ficaram acessiveis ao gravador.";
+    }
+
+    if (!reason) return;
+
+    if (attempt < 1) {
+      this.scheduleReadabilityCheck(2500, attempt + 1);
+      return;
+    }
+
+    const title = await page.title().catch(() => undefined);
+
+    await this.abortForUnsupportedPage({
+      url,
+      title,
+      reason,
+      details:
+        details +
+        " Frames detectados: " + probes.length +
+        "; controles acessiveis ao DOM: " + totals.interactiveCount +
+        "; campos de formulario: " + totals.formControlCount +
+        "; canvas: " + totals.canvasCount + ".",
+    });
+  }
+
+  private async abortForUnsupportedPage(info: UnsupportedPageInfo): Promise<void> {
+    if (this.unsupportedTriggered) return;
+
+    this.unsupportedTriggered = true;
+    this.clearReadabilityTimer();
+
+    const context = this.context;
+
+    this.recording = null;
+    this.page = null;
+    this.context = null;
+
+    await context?.close().catch(() => undefined);
+    this.onUnsupported?.(info);
+  }
+
   private recordAction(
     partial: Pick<AutomationAction, "type" | "url"> &
-      Partial<Pick<AutomationAction, "selector" | "value" | "isSecret">>
+      Partial<
+        Pick<
+          AutomationAction,
+          "selector" | "value" | "isSecret" | "frameUrl" | "frameName" | "x" | "y"
+        >
+      >
   ): void {
     if (!this.recording) return;
 
@@ -262,6 +501,10 @@ export class BrowserRecorder {
       selector: partial.selector,
       value: partial.value,
       isSecret: partial.isSecret,
+      frameUrl: partial.frameUrl,
+      frameName: partial.frameName,
+      x: partial.x,
+      y: partial.y,
     };
 
     this.lastTimestamp = now;

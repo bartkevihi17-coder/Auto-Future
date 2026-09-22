@@ -29,6 +29,11 @@ const browserSetupDescription = document.querySelector("#browser-setup-descripti
 const browserSetupCancel = document.querySelector("#browser-setup-cancel");
 const browserSetupOpen = document.querySelector("#browser-setup-open");
 const browserSetupDone = document.querySelector("#browser-setup-done");
+const unsupportedPageModal = document.querySelector("#unsupported-page-modal");
+const unsupportedPageDescription = document.querySelector("#unsupported-page-description");
+const unsupportedPageUrl = document.querySelector("#unsupported-page-url");
+const unsupportedPageDetails = document.querySelector("#unsupported-page-details");
+const unsupportedPageClose = document.querySelector("#unsupported-page-close");
 
 const editorEmpty = document.querySelector("#editor-empty");
 const editorWorkspace = document.querySelector("#editor-workspace");
@@ -1040,6 +1045,28 @@ function initRubberSegment() {
 }
 
 ipcRenderer.on("recording:action", (_event, action) => addEvent(action));
+
+ipcRenderer.on("recording:unsupported-page", (_event, info) => {
+  recordButton.disabled = false;
+  stopButton.disabled = true;
+  setStatus("Página não compatível", "error");
+
+  unsupportedPageDescription.textContent =
+    "O Auto Future detectou que essa tela não ficou acessível ao gravador. " +
+    "O navegador foi fechado automaticamente para evitar uma gravação incompleta.";
+
+  unsupportedPageUrl.textContent = info?.url || "URL não identificada";
+  unsupportedPageDetails.textContent =
+    info?.details ||
+    "A página pode estar usando iframe isolado, canvas, WebView, Shadow DOM fechado ou alguma proteção contra automação.";
+
+  unsupportedPageModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => unsupportedPageClose.focus());
+});
+
+unsupportedPageClose.addEventListener("click", () => {
+  unsupportedPageModal.classList.add("is-hidden");
+});
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();

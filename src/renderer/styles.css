@@ -2268,3 +2268,23 @@ body.logged-in .background-tint {
     grid-template-columns: 1fr auto;
   }
 }
+
+/* Unreadable / unsupported page modal */
+.unsupported-page-card {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.unsupported-page-url {
+  margin: 14px 0 10px;
+  border: 1px solid #e7e1eb;
+  border-radius: 10px;
+  padding: 10px 11px;
+  overflow: hidden;
+  color: #504857;
+  background: #faf9fb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

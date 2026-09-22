@@ -1,5 +1,5 @@
-import { chromium } from "playwright";
-import { AutomationActionType, AutomationRecording, RunOptions } from "../shared/types";
+import { Frame, Page, chromium } from "playwright";
+import { AutomationAction, AutomationActionType, AutomationRecording, RunOptions } from "../shared/types";
 import { prepareBrowserProfile } from "./browser-profile";
 
 export interface RunProgressEvent {
@@ -11,6 +11,115 @@ export interface RunProgressEvent {
 }
 
 type ProgressSink = (event: RunProgressEvent) => void;
+
+function comparableUrl(value?: string): string {
+  if (!value) return "";
+
+  try {
+    const url = new URL(value);
+    return url.origin + url.pathname + url.search;
+  } catch {
+    return value.split("#")[0];
+  }
+}
+
+function resolveActionFrame(page: Page, action: AutomationAction): Frame {
+  if (action.frameName) {
+    const byName = page.frame(action.frameName);
+    if (byName) return byName;
+  }
+
+  if (action.frameUrl) {
+    const expected = comparableUrl(action.frameUrl);
+    const byUrl = page.frames().find((frame) => comparableUrl(frame.url()) === expected);
+    if (byUrl) return byUrl;
+  }
+
+  return page.mainFrame();
+}
+
+async function actionPoint(
+  page: Page,
+  frame: Frame,
+  action: AutomationAction
+): Promise<{ x: number; y: number } | null> {
+  if (!Number.isFinite(action.x) || !Number.isFinite(action.y)) return null;
+
+  const x = Number(action.x);
+  const y = Number(action.y);
+
+  if (frame === page.mainFrame()) {
+    return { x, y };
+  }
+
+  try {
+    const frameElement = await frame.frameElement();
+    const box = await frameElement.boundingBox();
+
+    if (!box) return null;
+
+    return {
+      x: box.x + x,
+      y: box.y + y,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function clickAction(page: Page, action: AutomationAction): Promise<void> {
+  const frame = resolveActionFrame(page, action);
+  let selectorError: unknown = null;
+
+  if (action.selector) {
+    try {
+      const locator = frame.locator(action.selector).first();
+      await locator.waitFor({ state: "visible", timeout: 8_000 });
+      await locator.click();
+      return;
+    } catch (error) {
+      selectorError = error;
+    }
+  }
+
+  const point = await actionPoint(page, frame, action);
+
+  if (point) {
+    await page.mouse.click(point.x, point.y);
+    return;
+  }
+
+  if (selectorError) throw selectorError;
+  throw new Error("Nao foi possivel localizar o ponto do clique gravado.");
+}
+
+async function inputAction(page: Page, action: AutomationAction): Promise<void> {
+  const frame = resolveActionFrame(page, action);
+  let selectorError: unknown = null;
+
+  if (action.selector) {
+    try {
+      const locator = frame.locator(action.selector).first();
+      await locator.waitFor({ state: "visible", timeout: 8_000 });
+      await locator.fill(action.value ?? "");
+      return;
+    } catch (error) {
+      selectorError = error;
+    }
+  }
+
+  const point = await actionPoint(page, frame, action);
+
+  if (point) {
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press("Control+A");
+    await page.keyboard.insertText(action.value ?? "");
+    return;
+  }
+
+  if (selectorError) throw selectorError;
+  throw new Error("Nao foi possivel localizar o campo digitado na gravacao.");
+}
 
 export async function runRecording(
   recording: AutomationRecording,
@@ -111,10 +220,7 @@ export async function runRecording(
         }
 
         case "click": {
-          if (!action.selector) break;
-          const locator = page.locator(action.selector).first();
-          await locator.waitFor({ state: "visible", timeout: 15_000 });
-          await locator.click();
+          await clickAction(page, action);
           break;
         }
 
@@ -127,9 +233,7 @@ export async function runRecording(
             );
           }
 
-          const locator = page.locator(action.selector).first();
-          await locator.waitFor({ state: "visible", timeout: 15_000 });
-          await locator.fill(action.value ?? "");
+          await inputAction(page, action);
           break;
         }
       }

@@ -71,9 +71,16 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   await fs.mkdir(videosDir(), { recursive: true });
 
-  recorder = new BrowserRecorder(videosDir(), browserProfileDir(), (action) => {
-    mainWindow?.webContents.send("recording:action", action);
-  });
+  recorder = new BrowserRecorder(
+    videosDir(),
+    browserProfileDir(),
+    (action) => {
+      mainWindow?.webContents.send("recording:action", action);
+    },
+    (info) => {
+      mainWindow?.webContents.send("recording:unsupported-page", info);
+    }
+  );
 
   // Login temporariamente desabilitado: qualquer clique em Entrar libera o app.
   ipcMain.handle("auth:login", async () => ({

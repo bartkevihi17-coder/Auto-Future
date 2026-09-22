@@ -534,6 +534,30 @@
       </div>
     </div>
 
+    <div id="unsupported-page-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="unsupported-page-title">
+      <div class="modal-card unsupported-page-card">
+        <div class="modal-icon">!</div>
+
+        <div class="modal-copy">
+          <p class="eyebrow">PÁGINA NÃO COMPATÍVEL</p>
+          <h3 id="unsupported-page-title">Não consegui ler essa tela com segurança</h3>
+          <p id="unsupported-page-description">
+            O navegador foi fechado para evitar salvar uma automação incompleta.
+          </p>
+
+          <div class="unsupported-page-url" id="unsupported-page-url"></div>
+
+          <p class="modal-note" id="unsupported-page-details">
+            A página pode estar usando iframe isolado, canvas, WebView, Shadow DOM fechado ou alguma proteção contra automação.
+          </p>
+        </div>
+
+        <div class="modal-actions">
+          <button id="unsupported-page-close" class="button primary" type="button">Entendi</button>
+        </div>
+      </div>
+    </div>
+
     <div id="view-loading" class="view-loading">
       <div class="loader">
         <span></span><span></span><span></span>
