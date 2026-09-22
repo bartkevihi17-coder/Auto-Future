@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification, safeStorage } from "electron";
+import { app, BrowserWindow, ipcMain, Notification, safeStorage, session } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -7,6 +7,7 @@ import { BrowserRecorder } from "./automation/recorder";
 import { callQwen, QwenMessage } from "./ai/qwen";
 import { runRecording, RunProgressEvent } from "./automation/runner";
 import {
+  exportManagedBrowserCookies,
   getBrowserProfileStatus,
   launchBrowserProfileSetup,
   markBrowserProfileReady,
@@ -71,6 +72,100 @@ function aiActionsPath(): string {
 
 function browserProfileDir(): string {
   return path.join(app.getPath("userData"), "browser-profile");
+}
+
+const AI_BROWSER_PARTITION = "persist:auto-future-ai";
+
+async function syncManagedProfileToAiBrowserSession(): Promise<{
+  ok: true;
+  browserName: string;
+  importedCookies: number;
+  googleCookies: number;
+}> {
+  const exported = await exportManagedBrowserCookies(browserProfileDir());
+
+  if (!exported.ready) {
+    throw new Error(
+      "O perfil persistente do Auto Future ainda não possui uma sessão autenticada. " +
+        "Configure o navegador salvo primeiro e tente novamente."
+    );
+  }
+
+  if (!exported.cookies.length) {
+    throw new Error(
+      "O perfil persistente está marcado como pronto, mas não encontrei cookies para reutilizar."
+    );
+  }
+
+  const aiSession = session.fromPartition(AI_BROWSER_PARTITION, {
+    cache: true,
+  });
+
+  await aiSession.clearStorageData({
+    storages: ["cookies"],
+  });
+
+  let importedCookies = 0;
+  let googleCookies = 0;
+
+  for (const cookie of exported.cookies) {
+    const host = cookie.domain.replace(/^\./, "").trim();
+    if (!host) continue;
+
+    const pathName = cookie.path?.startsWith("/") ? cookie.path : "/";
+    const scheme = cookie.secure ? "https" : "http";
+    const sameSite =
+      cookie.sameSite === "Strict"
+        ? "strict"
+        : cookie.sameSite === "Lax"
+          ? "lax"
+          : "no_restriction";
+
+    try {
+      await aiSession.cookies.set({
+        url: scheme + "://" + host + pathName,
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: pathName,
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        sameSite,
+        ...(cookie.expires > 0
+          ? { expirationDate: cookie.expires }
+          : {}),
+      });
+
+      importedCookies += 1;
+
+      if (
+        host === "google.com" ||
+        host.endsWith(".google.com") ||
+        host === "gmail.com" ||
+        host.endsWith(".gmail.com")
+      ) {
+        googleCookies += 1;
+      }
+    } catch {
+      // Some browser-internal/partitioned cookies cannot be represented by
+      // Electron's cookie store. Continue with the reusable cookies.
+    }
+  }
+
+  await aiSession.flushStorageData();
+
+  if (importedCookies === 0) {
+    throw new Error(
+      "Não consegui importar nenhum cookie do perfil persistente para o navegador da IA."
+    );
+  }
+
+  return {
+    ok: true,
+    browserName: exported.browserName,
+    importedCookies,
+    googleCookies,
+  };
 }
 
 function normalizeExecutionSpeed(value: unknown): ExecutionSpeed {
@@ -1365,6 +1460,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("browser:complete-profile-setup", async () => {
     return markBrowserProfileReady(browserProfileDir());
+  });
+
+  ipcMain.handle("ai:browser:sync-session", async () => {
+    return syncManagedProfileToAiBrowserSession();
   });
 
   ipcMain.handle("recordings:list", async () => {

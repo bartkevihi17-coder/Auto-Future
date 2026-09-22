@@ -2660,26 +2660,74 @@ async function startAiAgent(action) {
   aiAgentWorkspace.classList.remove("is-hidden");
   aiAgentWorkspace.closest(".ai-shell")?.classList.add("agent-active");
   syncAiUndoButton();
-  setAiAgentStatus("Abrindo navegador...", "working");
+  setAiAgentStatus("Sincronizando login salvo...", "working");
 
   const initialUrl = normalizeAiStartUrlInput(action.startUrl);
   aiBrowserUrl.textContent = initialUrl;
 
   try {
+    const syncedSession = await ipcRenderer.invoke("ai:browser:sync-session");
+
+    if (!aiAgentAction || aiAgentAction.id !== action.id) return;
+
+    const initialHost = (() => {
+      try {
+        return new URL(initialUrl).hostname.toLocaleLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+
+    const needsGoogleSession =
+      initialHost === "google.com" ||
+      initialHost.endsWith(".google.com") ||
+      initialHost === "gmail.com" ||
+      initialHost.endsWith(".gmail.com");
+
+    if (needsGoogleSession && Number(syncedSession?.googleCookies || 0) === 0) {
+      throw new Error(
+        "O perfil salvo foi encontrado, mas a sessão Google não apareceu entre os cookies importados."
+      );
+    }
+
+    setAiAgentStatus(
+      "Sessão de " +
+        (syncedSession?.browserName || "navegador") +
+        " carregada · abrindo página...",
+      "working"
+    );
+
     aiAgentBrowser.loadURL(initialUrl);
 
     if (initialUrl !== "about:blank") {
       await waitForAiBrowserLoad();
-      await waitAi(650);
+      await waitAi(850);
     } else {
       await waitAi(450);
     }
 
     if (!aiAgentAction || aiAgentAction.id !== action.id) return;
 
+    const loadedUrl =
+      aiAgentBrowser.getURL?.() ||
+      aiBrowserUrl.textContent ||
+      "";
+
+    if (
+      needsGoogleSession &&
+      /^https:\/\/accounts\.google\.com(?:\/|$)/i.test(loadedUrl)
+    ) {
+      throw new Error(
+        "O Google recusou a sessão importada e tentou abrir a tela de login. " +
+          "O Auto Future interrompeu a execução para não obrigar você a autenticar novamente no navegador da IA."
+      );
+    }
+
     pushAiAgentContextEvent("started", null, {
       objective: action.instruction || "",
       initialUrl,
+      sessionSource: syncedSession?.browserName || "perfil persistente",
+      importedCookies: Number(syncedSession?.importedCookies || 0),
     });
 
     await requestAiAgentProposal();

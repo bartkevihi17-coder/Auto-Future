@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { chromium } from "playwright";
 
 const execFileAsync = promisify(execFile);
 const READY_MARKER = ".autofuture-profile-ready";
@@ -28,6 +29,17 @@ export interface BrowserProfileStatus {
   browserName: string;
   userDataDir: string;
   ready: boolean;
+}
+
+export interface ManagedBrowserCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: "Strict" | "Lax" | "None";
 }
 
 interface BrowserSource {
@@ -445,4 +457,79 @@ export async function prepareBrowserProfile(
     importedFromExisting: false,
     firstUse: !ready,
   };
+}
+
+export async function exportManagedBrowserCookies(
+  managedRootDir: string
+): Promise<{
+  browserName: string;
+  ready: boolean;
+  cookies: ManagedBrowserCookie[];
+}> {
+  const { source, userDataDir, ready } = await resolveManagedProfile(managedRootDir);
+
+  if (!ready) {
+    return {
+      browserName: source.browserName,
+      ready: false,
+      cookies: [],
+    };
+  }
+
+  let context: Awaited<ReturnType<typeof chromium.launchPersistentContext>> | null = null;
+
+  try {
+    context = await chromium.launchPersistentContext(userDataDir, {
+      headless: true,
+      channel: source.channel,
+      executablePath: source.executablePath,
+      viewport: { width: 1280, height: 720 },
+      args: [
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-session-crashed-bubble",
+      ],
+    });
+
+    const cookies = await context.cookies();
+
+    return {
+      browserName: source.browserName,
+      ready: true,
+      cookies: cookies.map((cookie) => ({
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path,
+        expires: cookie.expires,
+        httpOnly: cookie.httpOnly,
+        secure: cookie.secure,
+        sameSite: cookie.sameSite,
+      })),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+
+    if (
+      lower.includes("processsingleton") ||
+      lower.includes("already in use") ||
+      lower.includes("user data directory") ||
+      (lower.includes("profile") && lower.includes("lock"))
+    ) {
+      throw new Error(
+        "O perfil salvo do Auto Future está aberto em outra janela do navegador. " +
+          "Feche essa janela e tente executar com IA novamente."
+      );
+    }
+
+    throw new Error(
+      "Não consegui ler a sessão salva de " +
+        source.browserName +
+        ". " +
+        message
+    );
+  } finally {
+    await context?.close().catch(() => undefined);
+  }
 }
