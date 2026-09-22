@@ -9,7 +9,6 @@ const loginPassword = document.querySelector("#login-password");
 
 const sidebarToggle = document.querySelector("#sidebar-toggle");
 const lineSidebar = document.querySelector("#line-sidebar");
-const brandHome = document.querySelector("#brand-home");
 const logoutButton = document.querySelector("#logout-button");
 const pageTitle = document.querySelector("#page-title");
 
@@ -23,6 +22,9 @@ const status = document.querySelector("#status");
 const statusText = document.querySelector("#status-text");
 const events = document.querySelector("#events");
 const eventCountElement = document.querySelector("#event-count");
+const recordingWarningModal = document.querySelector("#recording-warning-modal");
+const recordWarningCancel = document.querySelector("#record-warning-cancel");
+const recordWarningContinue = document.querySelector("#record-warning-continue");
 
 const editorEmpty = document.querySelector("#editor-empty");
 const editorWorkspace = document.querySelector("#editor-workspace");
@@ -653,10 +655,6 @@ sidebarToggle.addEventListener("click", () => {
   setSidebarCollapsed(!sidebarCollapsed);
 });
 
-brandHome.addEventListener("click", () => {
-  openPage("home");
-});
-
 logoutButton.addEventListener("click", async () => {
   await ipcRenderer.invoke("auth:logout");
 
@@ -674,22 +672,57 @@ document.querySelectorAll("[data-open-page]").forEach((button) => {
   button.addEventListener("click", () => openPage(button.dataset.openPage));
 });
 
-recordButton.addEventListener("click", async () => {
-  try {
-    resetEventList();
-    setStatus("Gravando", "recording");
+function showRecordingWarning() {
+  recordingWarningModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => recordWarningContinue.focus());
+}
 
-    await ipcRenderer.invoke("recording:start", {
+function hideRecordingWarning() {
+  recordingWarningModal.classList.add("is-hidden");
+}
+
+async function startRecording() {
+  try {
+    hideRecordingWarning();
+    resetEventList();
+
+    recordButton.disabled = true;
+    recordWarningContinue.disabled = true;
+    recordWarningContinue.textContent = "Abrindo navegador...";
+    setStatus("Preparando navegador", "working");
+
+    const result = await ipcRenderer.invoke("recording:start", {
       url: recordUrl.value.trim(),
       name: recordName.value.trim(),
     });
 
-    recordButton.disabled = true;
     stopButton.disabled = false;
     runButton.disabled = true;
+    setStatus("Gravando · " + (result.browserName || "navegador"), "recording");
   } catch (error) {
+    recordButton.disabled = false;
+    stopButton.disabled = true;
     setStatus("Erro", "error");
     alert(error?.message || String(error));
+  } finally {
+    recordWarningContinue.disabled = false;
+    recordWarningContinue.textContent = "Entendi, começar";
+  }
+}
+
+recordButton.addEventListener("click", showRecordingWarning);
+recordWarningCancel.addEventListener("click", hideRecordingWarning);
+recordWarningContinue.addEventListener("click", startRecording);
+
+recordingWarningModal.addEventListener("click", (event) => {
+  if (event.target === recordingWarningModal) {
+    hideRecordingWarning();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !recordingWarningModal.classList.contains("is-hidden")) {
+    hideRecordingWarning();
   }
 });
 

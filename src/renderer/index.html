@@ -44,15 +44,7 @@
 
     <div id="app-shell" class="app-shell is-hidden">
       <aside id="sidebar" class="sidebar" aria-label="Menu lateral">
-        <div class="sidebar-head">
-          <button id="brand-home" class="brand-button" type="button" aria-label="Voltar para o início">
-            <span class="brand-mark small">AF</span>
-            <span class="brand-text">
-              <strong>Auto Future</strong>
-              <small>Workspace</small>
-            </span>
-          </button>
-
+        <div class="sidebar-head sidebar-head--minimal">
           <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Recolher menu">
             <span>‹</span>
           </button>
@@ -370,6 +362,30 @@
           <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="runs">Histórico</button>
         </div>
       </nav>
+    </div>
+
+    <div id="recording-warning-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="recording-warning-title">
+      <div class="modal-card">
+        <div class="modal-icon">!</div>
+        <div class="modal-copy">
+          <p class="eyebrow">ANTES DE GRAVAR</p>
+          <h3 id="recording-warning-title">CAPTCHAs e confirmações podem aparecer</h3>
+          <p>
+            O Auto Future vai tentar reutilizar uma cópia da sessão do seu navegador padrão para manter contas e cookies já existentes.
+          </p>
+          <p>
+            Alguns sites, como Google, ainda podem pedir CAPTCHA, confirmação de login ou verificação em duas etapas. Quando isso acontecer, resolva manualmente no navegador e continue a gravação normalmente.
+          </p>
+          <p class="modal-note">
+            Na primeira gravação, se a sessão não puder ser importada, feche o navegador padrão e tente novamente.
+          </p>
+        </div>
+
+        <div class="modal-actions">
+          <button id="record-warning-cancel" class="button" type="button">Cancelar</button>
+          <button id="record-warning-continue" class="button primary" type="button">Entendi, começar</button>
+        </div>
+      </div>
     </div>
 
     <div id="view-loading" class="view-loading">

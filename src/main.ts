@@ -18,6 +18,10 @@ function videosDir(): string {
   return path.join(recordingsDir(), "videos");
 }
 
+function browserProfileDir(): string {
+  return path.join(app.getPath("userData"), "browser-profile");
+}
+
 async function persistRecording(recording: AutomationRecording): Promise<string> {
   const dir = recordingsDir();
   await fs.mkdir(dir, { recursive: true });
@@ -39,7 +43,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 940,
     minHeight: 650,
-    backgroundColor: "#07111b",
+    backgroundColor: "#f6f6fb",
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: true,
@@ -54,7 +58,7 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   await fs.mkdir(videosDir(), { recursive: true });
 
-  recorder = new BrowserRecorder(videosDir(), (action) => {
+  recorder = new BrowserRecorder(videosDir(), browserProfileDir(), (action) => {
     mainWindow?.webContents.send("recording:action", action);
   });
 
@@ -78,7 +82,12 @@ app.whenReady().then(async () => {
   ipcMain.handle("recording:start", async (_event, payload: { url: string; name?: string }) => {
     const url = new URL(payload.url).toString();
     const recording = await recorder.start(url, payload.name?.trim() || "Nova automacao");
-    return { id: recording.id, createdAt: recording.createdAt };
+    const browser = recorder.getBrowserSessionInfo();
+    return {
+      id: recording.id,
+      createdAt: recording.createdAt,
+      browserName: browser.browserName,
+    };
   });
 
   ipcMain.handle("recording:stop", async () => {

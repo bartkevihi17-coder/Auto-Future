@@ -1,20 +1,22 @@
-import { Browser, BrowserContext, Page, chromium } from "playwright";
+import { BrowserContext, Page, chromium } from "playwright";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { AutomationAction, AutomationRecording } from "../shared/types";
+import { prepareBrowserProfile } from "./browser-profile";
 
 type EventSink = (action: AutomationAction) => void;
 
 export class BrowserRecorder {
-  private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private recording: AutomationRecording | null = null;
   private lastTimestamp = 0;
+  private browserName = "Chromium";
 
   constructor(
     private readonly videoDir: string,
+    private readonly browserProfileDir: string,
     private readonly onAction?: EventSink
   ) {}
 
@@ -25,6 +27,49 @@ export class BrowserRecorder {
 
     await fs.mkdir(this.videoDir, { recursive: true });
 
+    const preparedProfile = await prepareBrowserProfile(this.browserProfileDir);
+    this.browserName = preparedProfile.browserName;
+
+    const launchArgs = [
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-session-crashed-bubble",
+    ];
+
+    if (preparedProfile.profileDirectory) {
+      launchArgs.push("--profile-directory=" + preparedProfile.profileDirectory);
+    }
+
+    try {
+      this.context = await chromium.launchPersistentContext(preparedProfile.userDataDir, {
+        headless: false,
+        channel: preparedProfile.channel,
+        executablePath: preparedProfile.executablePath,
+        viewport: { width: 1280, height: 720 },
+        recordVideo: {
+          dir: this.videoDir,
+          size: { width: 1280, height: 720 },
+        },
+        args: launchArgs,
+      });
+    } catch (firstError) {
+      if (preparedProfile.channel || preparedProfile.executablePath) {
+        this.context = await chromium.launchPersistentContext(preparedProfile.userDataDir, {
+          headless: false,
+          viewport: { width: 1280, height: 720 },
+          recordVideo: {
+            dir: this.videoDir,
+            size: { width: 1280, height: 720 },
+          },
+          args: launchArgs,
+        }).catch(() => {
+          throw firstError;
+        });
+      } else {
+        throw firstError;
+      }
+    }
+
     this.recording = {
       id: randomUUID(),
       name,
@@ -34,14 +79,6 @@ export class BrowserRecorder {
     };
 
     this.lastTimestamp = Date.now();
-    this.browser = await chromium.launch({ headless: false });
-    this.context = await this.browser.newContext({
-      viewport: { width: 1280, height: 720 },
-      recordVideo: {
-        dir: this.videoDir,
-        size: { width: 1280, height: 720 },
-      },
-    });
 
     await this.context.exposeBinding("__autoFutureRecord", async (_source, payload: unknown) => {
       if (!payload || typeof payload !== "object") return;
@@ -138,6 +175,10 @@ export class BrowserRecorder {
 `,
     });
 
+    for (const restoredPage of this.context.pages()) {
+      await restoredPage.close().catch(() => undefined);
+    }
+
     this.page = await this.context.newPage();
 
     this.page.on("framenavigated", (frame) => {
@@ -147,7 +188,15 @@ export class BrowserRecorder {
       this.recordAction({ type: "navigate", url });
     });
 
-    await this.page.goto(initialUrl, { waitUntil: "domcontentloaded" });
+    try {
+      await this.page.goto(initialUrl, { waitUntil: "domcontentloaded" });
+    } catch (error) {
+      await this.context.close().catch(() => undefined);
+      this.context = null;
+      this.page = null;
+      this.recording = null;
+      throw error;
+    }
 
     return this.recording;
   }
@@ -175,18 +224,19 @@ export class BrowserRecorder {
       }
     }
 
-    await this.browser?.close().catch(() => undefined);
-
     this.recording = null;
     this.page = null;
     this.context = null;
-    this.browser = null;
 
     return finished;
   }
 
   isRecording(): boolean {
     return Boolean(this.recording);
+  }
+
+  getBrowserSessionInfo(): { browserName: string } {
+    return { browserName: this.browserName };
   }
 
   private recordAction(
