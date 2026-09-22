@@ -212,16 +212,30 @@
             </div>
 
             <div class="editor-heading-actions">
-              <button id="save-editor-button" class="button compact primary" type="button" disabled>Salvar e continuar</button>
+              <button id="editor-library-button" class="button compact is-hidden" type="button">← Automações</button>
+              <button id="save-editor-button" class="button compact primary is-hidden" type="button" disabled>Salvar e continuar</button>
             </div>
           </div>
 
-          <div id="editor-empty" class="placeholder surface-card magic-card">
-            <span class="placeholder-icon">✦</span>
-            <p class="eyebrow">EDITOR</p>
-            <h1>Grave algo primeiro.</h1>
-            <p>Ao finalizar uma gravação, ela abre aqui automaticamente.</p>
-          </div>
+          <section id="automation-library-section" class="automation-library-section">
+            <div class="library-heading">
+              <div>
+                <p class="eyebrow">AUTOMAÇÕES SALVAS</p>
+                <h3>Continue de onde parou</h3>
+                <p>As automações ficam salvas fora da instalação e permanecem após atualizações do app.</p>
+              </div>
+              <strong id="automation-library-count">0</strong>
+            </div>
+
+            <div id="automation-library" class="automation-library"></div>
+
+            <div id="automation-library-empty" class="placeholder surface-card magic-card">
+              <span class="placeholder-icon">✦</span>
+              <p class="eyebrow">EDITOR</p>
+              <h1>Nenhuma automação salva.</h1>
+              <p>Finalize uma gravação para ela aparecer aqui e poder ser editada depois.</p>
+            </div>
+          </section>
 
           <div id="editor-workspace" class="editor-shell is-hidden">
             <div class="editor-main">
@@ -311,6 +325,15 @@
                     <span>1x</span>
                   </div>
                 </div>
+              </section>
+
+              <section class="editor-schedule-summary">
+                <div>
+                  <p class="eyebrow">REPETIÇÕES</p>
+                  <strong id="editor-schedule-count">Sem agendamentos</strong>
+                  <span>Configure dias, horários e modo visível/background.</span>
+                </div>
+                <button id="editor-schedule-button" class="button compact" type="button">Configurar</button>
               </section>
 
               <div class="inspector-divider"></div>
@@ -429,29 +452,76 @@
         </section>
 
         <section class="page" data-page-view="recordings">
-          <div class="placeholder surface-card magic-card">
+          <div class="page-heading compact-heading">
+            <div>
+              <p class="eyebrow">BIBLIOTECA</p>
+              <h1>Gravações</h1>
+              <p>Arquivos persistentes do Auto Future.</p>
+            </div>
+          </div>
+
+          <div id="recordings-library" class="automation-library"></div>
+          <div id="recordings-library-empty" class="placeholder surface-card is-hidden">
             <span class="placeholder-icon">▤</span>
-            <p class="eyebrow">EM BREVE</p>
-            <h1>Gravações</h1>
-            <p>A biblioteca completa entra na próxima etapa.</p>
+            <h1>Nenhuma gravação salva.</h1>
           </div>
         </section>
 
-        <section class="page" data-page-view="schedules">
-          <div class="placeholder surface-card magic-card">
-            <span class="placeholder-icon">◷</span>
-            <p class="eyebrow">EM BREVE</p>
-            <h1>Agendamentos</h1>
-            <p>Dias, horários e repetição ficarão aqui.</p>
+        <section class="page schedules-page" data-page-view="schedules">
+          <div class="page-heading compact-heading">
+            <div>
+              <p class="eyebrow">AGENDA</p>
+              <h1>Agendamentos</h1>
+              <p>Clique em um horário do mapa para adicionar uma automação.</p>
+            </div>
+          </div>
+
+          <div class="schedule-warning">
+            <span>!</span>
+            <p>
+              O agendamento só pode ser executado enquanto o PC estiver ligado e o Auto Future estiver em execução.
+              Cada horário aceita no máximo 3 automações.
+            </p>
+          </div>
+
+          <div class="schedule-layout">
+            <section class="surface-card schedule-map-card">
+              <div class="schedule-map-toolbar">
+                <div>
+                  <strong>Mapa semanal</strong>
+                  <span>00:00 — 23:00</span>
+                </div>
+                <button id="schedule-refresh-button" class="button compact" type="button">Atualizar</button>
+              </div>
+              <div id="schedule-map" class="schedule-map"></div>
+            </section>
+
+            <aside class="surface-card schedule-side">
+              <div class="section-title">
+                <div>
+                  <p class="eyebrow">CONFIGURADOS</p>
+                  <h3>Agendamentos</h3>
+                </div>
+                <strong id="schedule-count">0</strong>
+              </div>
+              <div id="schedule-list" class="schedule-list"></div>
+            </aside>
           </div>
         </section>
 
         <section class="page" data-page-view="runs">
-          <div class="placeholder surface-card magic-card">
+          <div class="page-heading compact-heading">
+            <div>
+              <p class="eyebrow">HISTÓRICO</p>
+              <h1>Execuções</h1>
+              <p>Execuções manuais e agendadas ficam registradas aqui.</p>
+            </div>
+          </div>
+
+          <div id="runs-list" class="runs-list"></div>
+          <div id="runs-empty" class="placeholder surface-card">
             <span class="placeholder-icon">↻</span>
-            <p class="eyebrow">EM BREVE</p>
-            <h1>Histórico</h1>
-            <p>Execuções, logs e falhas das automações ficarão aqui.</p>
+            <h1>Nenhuma execução ainda.</h1>
           </div>
         </section>
       </main>
@@ -554,6 +624,77 @@
 
         <div class="modal-actions">
           <button id="unsupported-page-close" class="button primary" type="button">Entendi</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="schedule-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
+      <div class="modal-card schedule-modal-card">
+        <div class="modal-copy">
+          <p class="eyebrow">AGENDAMENTO</p>
+          <h3 id="schedule-modal-title">Adicionar automação</h3>
+          <p>Configure quando a automação será executada e se o navegador ficará visível.</p>
+        </div>
+
+        <label class="field">
+          <span>Automação</span>
+          <select id="schedule-automation-select"></select>
+        </label>
+
+        <div class="schedule-modal-options">
+          <label class="toggle-row">
+            <input id="schedule-repeat-input" type="checkbox" checked />
+            <span class="toggle"></span>
+            <span>Repetir semanalmente</span>
+          </label>
+
+          <label class="toggle-row">
+            <input id="schedule-visible-input" type="checkbox" checked />
+            <span class="toggle"></span>
+            <span>Abrir navegador visível</span>
+          </label>
+        </div>
+
+        <div id="schedule-repeat-fields">
+          <div class="schedule-days-header">
+            <span>Dias da semana</span>
+            <label class="schedule-same-time">
+              <input id="schedule-same-time-input" type="checkbox" checked />
+              Mesmo horário
+            </label>
+          </div>
+
+          <div id="schedule-day-picker" class="schedule-day-picker"></div>
+
+          <label id="schedule-base-time-field" class="field">
+            <span>Horário</span>
+            <input id="schedule-base-time-input" type="time" value="09:00" />
+          </label>
+
+          <div id="schedule-different-times" class="schedule-different-times is-hidden"></div>
+        </div>
+
+        <div id="schedule-one-time-fields" class="schedule-one-time-fields is-hidden">
+          <label class="field">
+            <span>Data</span>
+            <input id="schedule-date-input" type="date" />
+          </label>
+
+          <label class="field">
+            <span>Horário</span>
+            <input id="schedule-one-time-input" type="time" value="09:00" />
+          </label>
+        </div>
+
+        <p class="modal-note">
+          O PC precisa estar ligado e o Auto Future em execução no horário configurado. O limite é de 3 automações por horário.
+        </p>
+
+        <div class="modal-actions">
+          <button id="schedule-delete-button" class="button danger compact is-hidden" type="button">Excluir</button>
+          <span class="modal-actions-spacer"></span>
+          <button id="schedule-cancel-button" class="button" type="button">Cancelar</button>
+          <button id="schedule-save-button" class="button primary" type="button">Salvar agendamento</button>
         </div>
       </div>
     </div>

@@ -25,6 +25,10 @@ export class BrowserRecorder {
   private browserFirstUse = false;
   private readabilityTimer: ReturnType<typeof setTimeout> | null = null;
   private unsupportedTriggered = false;
+  private recordingStartedAt = 0;
+  private pageSequence = 0;
+  private pageIds = new Map<Page, string>();
+  private trackedPages = new Map<Page, { pageId: string; startedAtMs: number }>();
 
   constructor(
     private readonly videoDir: string,
@@ -44,6 +48,10 @@ export class BrowserRecorder {
     this.browserName = preparedProfile.browserName;
     this.browserFirstUse = preparedProfile.firstUse;
     this.unsupportedTriggered = false;
+    this.recordingStartedAt = Date.now();
+    this.pageSequence = 0;
+    this.pageIds.clear();
+    this.trackedPages.clear();
 
     const launchArgs = [
       "--no-first-run",
@@ -121,6 +129,7 @@ export class BrowserRecorder {
         frameName: source.frame.name() || undefined,
         x: Number.isFinite(data.x) ? Number(data.x) : undefined,
         y: Number.isFinite(data.y) ? Number(data.y) : undefined,
+        pageId: source.page ? this.pageIds.get(source.page) : undefined,
       });
     });
 
@@ -246,24 +255,13 @@ export class BrowserRecorder {
     const restoredPages = this.context.pages();
     this.page = restoredPages[0] ?? await this.context.newPage();
 
-    for (const extraPage of restoredPages.slice(1)) {
-      await extraPage.close().catch(() => undefined);
+    for (const page of this.context.pages()) {
+      this.registerPage(page);
     }
 
-    this.page.on("framenavigated", (frame) => {
-      if (frame !== this.page?.mainFrame()) return;
-      const url = frame.url();
-      if (!url || url === "about:blank") return;
-      this.recordAction({ type: "navigate", url });
-      this.scheduleReadabilityCheck(2500, 0);
-    });
-
-    this.page.on("crash", () => {
-      void this.abortForUnsupportedPage({
-        url: this.page?.url() || initialUrl,
-        reason: "page-crashed",
-        details: "A aba do navegador travou enquanto o Auto Future tentava acompanhar a pagina.",
-      });
+    this.context.on("page", (page) => {
+      this.registerPage(page);
+      this.page = page;
     });
 
     try {
@@ -288,26 +286,54 @@ export class BrowserRecorder {
     this.clearReadabilityTimer();
 
     const finished = this.recording;
-    const video = this.page?.video();
+    const pageVideos = [...this.trackedPages.entries()].map(([page, meta]) => ({
+      page,
+      meta,
+      video: page.video(),
+      url: page.url(),
+    }));
 
     await this.context?.close().catch(() => undefined);
 
-    if (video) {
-      const rawVideoPath = await video.path().catch(() => null);
-      if (rawVideoPath) {
-        const finalPath = path.join(this.videoDir, finished.id + ".webm");
-        if (rawVideoPath !== finalPath) {
-          await fs.rename(rawVideoPath, finalPath).catch(async () => {
-            await fs.copyFile(rawVideoPath, finalPath);
-          });
-        }
-        finished.videoPath = finalPath;
+    const segments = [];
+
+    for (const entry of pageVideos) {
+      if (!entry.video) continue;
+
+      const rawVideoPath = await entry.video.path().catch(() => null);
+      if (!rawVideoPath) continue;
+
+      const finalPath = path.join(
+        this.videoDir,
+        finished.id + "-" + entry.meta.pageId + ".webm"
+      );
+
+      if (rawVideoPath !== finalPath) {
+        await fs.rename(rawVideoPath, finalPath).catch(async () => {
+          await fs.copyFile(rawVideoPath, finalPath);
+        });
       }
+
+      segments.push({
+        pageId: entry.meta.pageId,
+        startedAtMs: entry.meta.startedAtMs,
+        videoPath: finalPath,
+        url: entry.url,
+      });
+    }
+
+    finished.videoSegments = segments;
+
+    const firstSegment = [...segments].sort((a, b) => a.startedAtMs - b.startedAtMs)[0];
+    if (firstSegment?.videoPath) {
+      finished.videoPath = firstSegment.videoPath;
     }
 
     this.recording = null;
     this.page = null;
     this.context = null;
+    this.pageIds.clear();
+    this.trackedPages.clear();
 
     return finished;
   }
@@ -321,6 +347,50 @@ export class BrowserRecorder {
       browserName: this.browserName,
       firstUse: this.browserFirstUse,
     };
+  }
+
+  private registerPage(page: Page): void {
+    if (this.pageIds.has(page)) return;
+
+    const pageId = "p" + (++this.pageSequence);
+    const startedAtMs = Math.max(0, Date.now() - this.recordingStartedAt);
+
+    this.pageIds.set(page, pageId);
+    this.trackedPages.set(page, { pageId, startedAtMs });
+
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+
+      const url = frame.url();
+      if (!url || url === "about:blank") return;
+
+      this.page = page;
+      this.recordAction({
+        type: "navigate",
+        url,
+        pageId,
+      });
+
+      this.scheduleReadabilityCheck(2500, 0);
+    });
+
+    page.on("crash", () => {
+      void this.abortForUnsupportedPage({
+        url: page.url() || this.recording?.initialUrl || "",
+        reason: "page-crashed",
+        details: "Uma aba do navegador travou enquanto o Auto Future tentava acompanhar a pagina.",
+      });
+    });
+
+    page.on("close", () => {
+      if (this.page === page) {
+        const fallback = [...this.trackedPages.keys()].find(
+          (candidate) => candidate !== page && !candidate.isClosed()
+        );
+
+        if (fallback) this.page = fallback;
+      }
+    });
   }
 
   private clearReadabilityTimer(): void {
@@ -475,6 +545,8 @@ export class BrowserRecorder {
     this.recording = null;
     this.page = null;
     this.context = null;
+    this.pageIds.clear();
+    this.trackedPages.clear();
 
     await context?.close().catch(() => undefined);
     this.onUnsupported?.(info);
@@ -485,7 +557,7 @@ export class BrowserRecorder {
       Partial<
         Pick<
           AutomationAction,
-          "selector" | "value" | "isSecret" | "frameUrl" | "frameName" | "x" | "y"
+          "selector" | "value" | "isSecret" | "frameUrl" | "frameName" | "pageId" | "x" | "y"
         >
       >
   ): void {
@@ -503,6 +575,7 @@ export class BrowserRecorder {
       isSecret: partial.isSecret,
       frameUrl: partial.frameUrl,
       frameName: partial.frameName,
+      pageId: partial.pageId,
       x: partial.x,
       y: partial.y,
     };

@@ -35,9 +35,39 @@ const unsupportedPageUrl = document.querySelector("#unsupported-page-url");
 const unsupportedPageDetails = document.querySelector("#unsupported-page-details");
 const unsupportedPageClose = document.querySelector("#unsupported-page-close");
 
-const editorEmpty = document.querySelector("#editor-empty");
+const scheduleMap = document.querySelector("#schedule-map");
+const scheduleList = document.querySelector("#schedule-list");
+const scheduleCount = document.querySelector("#schedule-count");
+const scheduleRefreshButton = document.querySelector("#schedule-refresh-button");
+const runsList = document.querySelector("#runs-list");
+const runsEmpty = document.querySelector("#runs-empty");
+
+const scheduleModal = document.querySelector("#schedule-modal");
+const scheduleAutomationSelect = document.querySelector("#schedule-automation-select");
+const scheduleRepeatInput = document.querySelector("#schedule-repeat-input");
+const scheduleVisibleInput = document.querySelector("#schedule-visible-input");
+const scheduleRepeatFields = document.querySelector("#schedule-repeat-fields");
+const scheduleOneTimeFields = document.querySelector("#schedule-one-time-fields");
+const scheduleSameTimeInput = document.querySelector("#schedule-same-time-input");
+const scheduleDayPicker = document.querySelector("#schedule-day-picker");
+const scheduleBaseTimeInput = document.querySelector("#schedule-base-time-input");
+const scheduleBaseTimeField = document.querySelector("#schedule-base-time-field");
+const scheduleDifferentTimes = document.querySelector("#schedule-different-times");
+const scheduleDateInput = document.querySelector("#schedule-date-input");
+const scheduleOneTimeInput = document.querySelector("#schedule-one-time-input");
+const scheduleDeleteButton = document.querySelector("#schedule-delete-button");
+const scheduleCancelButton = document.querySelector("#schedule-cancel-button");
+const scheduleSaveButton = document.querySelector("#schedule-save-button");
+
+const automationLibrarySection = document.querySelector("#automation-library-section");
+const automationLibrary = document.querySelector("#automation-library");
+const automationLibraryEmpty = document.querySelector("#automation-library-empty");
+const automationLibraryCount = document.querySelector("#automation-library-count");
 const editorWorkspace = document.querySelector("#editor-workspace");
 const editorTitle = document.querySelector("#editor-title");
+const editorLibraryButton = document.querySelector("#editor-library-button");
+const recordingsLibrary = document.querySelector("#recordings-library");
+const recordingsLibraryEmpty = document.querySelector("#recordings-library-empty");
 const recordingVideo = document.querySelector("#recording-video");
 const videoMissing = document.querySelector("#video-missing");
 const timelineActions = document.querySelector("#timeline-actions");
@@ -65,6 +95,8 @@ const inspectorSelector = document.querySelector("#inspector-selector");
 const inspectorValue = document.querySelector("#inspector-value");
 const deleteActionButton = document.querySelector("#delete-action-button");
 const saveEditorButton = document.querySelector("#save-editor-button");
+const editorScheduleCount = document.querySelector("#editor-schedule-count");
+const editorScheduleButton = document.querySelector("#editor-schedule-button");
 const editorSpeedGauge = document.querySelector("#editor-speed-gauge");
 const executionSpeedGauge = document.querySelector("#execution-speed-gauge");
 const executionSpeedText = document.querySelector("#execution-speed-text");
@@ -91,6 +123,11 @@ let sidebarCollapsed = false;
 let currentRecording = null;
 let selectedActionId = null;
 let browserSetupNextAction = "none";
+let savedRecordings = [];
+let savedSchedules = [];
+let currentScheduleId = null;
+let currentVideoPageId = null;
+let pendingVideoSeekSeconds = 0;
 let rubberActiveIndex = 0;
 let rubberDrag = null;
 let suppressRubberClick = false;
@@ -112,6 +149,21 @@ const pageNames = {
   schedules: "Agendamentos",
   runs: "Histórico",
 };
+
+const WEEK_DAYS = [
+  { value: 1, short: "Seg", label: "Segunda" },
+  { value: 2, short: "Ter", label: "Terça" },
+  { value: 3, short: "Qua", label: "Quarta" },
+  { value: 4, short: "Qui", label: "Quinta" },
+  { value: 5, short: "Sex", label: "Sexta" },
+  { value: 6, short: "Sáb", label: "Sábado" },
+  { value: 0, short: "Dom", label: "Domingo" },
+];
+
+const SCHEDULE_HOURS = Array.from(
+  { length: 24 },
+  (_, index) => String(index).padStart(2, "0") + ":00"
+);
 
 function setStatus(text, kind = "idle") {
   statusText.textContent = text;
@@ -205,6 +257,19 @@ function openPage(name, options = {}) {
   if (options.collapse !== false) {
     collapseSidebarForNavigation();
   }
+
+  if (name === "editor") {
+    void refreshRecordings();
+    if (!currentRecording || editorWorkspace.classList.contains("is-hidden")) {
+      showEditorLibrary();
+    }
+  } else if (name === "recordings") {
+    void refreshRecordings();
+  } else if (name === "schedules") {
+    void Promise.all([refreshRecordings(), refreshSchedules()]);
+  } else if (name === "runs") {
+    void refreshRuns();
+  }
 }
 
 function addEvent(action) {
@@ -262,6 +327,664 @@ function actionLabel(action) {
   if (action.type === "navigate") return "Navegação";
   return action.type;
 }
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function automationScheduleCount(automationId) {
+  return savedSchedules.filter(
+    (schedule) => schedule.automationId === automationId
+  ).length;
+}
+
+function renderAutomationCard(recording) {
+  const card = document.createElement("article");
+  card.className = "automation-card surface-card";
+
+  const scheduleTotal = automationScheduleCount(recording.id);
+  const speed = speedLabel(recording.executionSpeed);
+  const actions = recording.actions?.length || 0;
+
+  card.innerHTML =
+    '<div class="automation-card__top">' +
+      '<div class="automation-card__icon">✦</div>' +
+      '<div class="automation-card__meta">' +
+        "<span>" + escapeHtml(speed) + "</span>" +
+        "<span>" + actions + " ações</span>" +
+      "</div>" +
+    "</div>" +
+    '<div class="automation-card__body">' +
+      "<h3>" + escapeHtml(recording.name || "Automação") + "</h3>" +
+      "<p>" + escapeHtml(recording.initialUrl || "") + "</p>" +
+    "</div>" +
+    '<div class="automation-card__foot">' +
+      "<span>" +
+        (scheduleTotal
+          ? scheduleTotal + " agendamento" + (scheduleTotal === 1 ? "" : "s")
+          : "Sem agendamento") +
+      "</span>" +
+      "<span>" + escapeHtml(formatDateTime(recording.updatedAt || recording.createdAt)) + "</span>" +
+    "</div>" +
+    '<div class="automation-card__actions">' +
+      '<button class="button compact automation-edit-button" type="button">Editar</button>' +
+      '<button class="button compact automation-schedule-button" type="button">Agendar</button>' +
+    "</div>";
+
+  card
+    .querySelector(".automation-edit-button")
+    .addEventListener("click", () => void openAutomationForEdit(recording.id));
+
+  card
+    .querySelector(".automation-schedule-button")
+    .addEventListener("click", () => {
+      openPage("schedules");
+      openScheduleModal({
+        automationId: recording.id,
+      });
+    });
+
+  return card;
+}
+
+function renderAutomationLibraries() {
+  automationLibrary.innerHTML = "";
+  recordingsLibrary.innerHTML = "";
+
+  automationLibraryCount.textContent = String(savedRecordings.length);
+
+  automationLibraryEmpty.classList.toggle(
+    "is-hidden",
+    savedRecordings.length > 0
+  );
+
+  recordingsLibraryEmpty.classList.toggle(
+    "is-hidden",
+    savedRecordings.length > 0
+  );
+
+  for (const recording of savedRecordings) {
+    automationLibrary.appendChild(renderAutomationCard(recording));
+    recordingsLibrary.appendChild(renderAutomationCard(recording));
+  }
+}
+
+async function refreshRecordings() {
+  savedRecordings = await ipcRenderer.invoke("recordings:list");
+  renderAutomationLibraries();
+  populateScheduleAutomationSelect();
+}
+
+async function openAutomationForEdit(id) {
+  try {
+    setStatus("Abrindo automação", "working");
+    const result = await ipcRenderer.invoke("recording:load", id);
+    loadEditor(result.recording);
+    openPage("editor");
+    setStatus("Automação carregada", "success");
+  } catch (error) {
+    setStatus("Erro ao abrir", "error");
+    alert(error?.message || String(error));
+  }
+}
+
+function showEditorLibrary() {
+  recordingVideo.pause();
+  automationLibrarySection.classList.remove("is-hidden");
+  editorWorkspace.classList.add("is-hidden");
+  editorLibraryButton.classList.add("is-hidden");
+  saveEditorButton.classList.add("is-hidden");
+  editorTitle.textContent = "Automações";
+  pageTitle.textContent = "Editor";
+}
+
+function nextDateForWeekday(weekday) {
+  const date = new Date();
+  const delta = (weekday - date.getDay() + 7) % 7;
+  date.setDate(date.getDate() + delta);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return year + "-" + month + "-" + day;
+}
+
+function populateScheduleAutomationSelect() {
+  if (!scheduleAutomationSelect) return;
+
+  const current = scheduleAutomationSelect.value;
+  scheduleAutomationSelect.innerHTML = "";
+
+  if (!savedRecordings.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Nenhuma automação salva";
+    scheduleAutomationSelect.appendChild(option);
+    return;
+  }
+
+  for (const recording of savedRecordings) {
+    const option = document.createElement("option");
+    option.value = recording.id;
+    option.textContent = recording.name || "Automação";
+    scheduleAutomationSelect.appendChild(option);
+  }
+
+  if (savedRecordings.some((recording) => recording.id === current)) {
+    scheduleAutomationSelect.value = current;
+  }
+}
+
+function selectedScheduleDays() {
+  return [...scheduleDayPicker.querySelectorAll(".schedule-day-button.is-selected")]
+    .map((button) => Number(button.dataset.weekday))
+    .filter((weekday) => Number.isInteger(weekday));
+}
+
+function buildScheduleDayPicker(selected = []) {
+  scheduleDayPicker.innerHTML = "";
+
+  for (const day of WEEK_DAYS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "schedule-day-button";
+    button.dataset.weekday = String(day.value);
+    button.textContent = day.short;
+    button.classList.toggle("is-selected", selected.includes(day.value));
+
+    button.addEventListener("click", () => {
+      button.classList.toggle("is-selected");
+
+      if (!scheduleSameTimeInput.checked) {
+        renderDifferentScheduleTimes();
+      }
+    });
+
+    scheduleDayPicker.appendChild(button);
+  }
+}
+
+function renderDifferentScheduleTimes(existingSlots = null) {
+  const previous = {};
+
+  scheduleDifferentTimes
+    .querySelectorAll("input[data-weekday]")
+    .forEach((input) => {
+      previous[input.dataset.weekday] = input.value;
+    });
+
+  if (Array.isArray(existingSlots)) {
+    for (const slot of existingSlots) {
+      previous[String(slot.weekday)] = slot.time;
+    }
+  }
+
+  scheduleDifferentTimes.innerHTML = "";
+
+  for (const weekday of selectedScheduleDays()) {
+    const day = WEEK_DAYS.find((item) => item.value === weekday);
+    if (!day) continue;
+
+    const row = document.createElement("label");
+    row.className = "schedule-time-row";
+
+    const label = document.createElement("span");
+    label.textContent = day.label;
+
+    const input = document.createElement("input");
+    input.type = "time";
+    input.dataset.weekday = String(weekday);
+    input.value =
+      previous[String(weekday)] ||
+      scheduleBaseTimeInput.value ||
+      "09:00";
+
+    row.append(label, input);
+    scheduleDifferentTimes.appendChild(row);
+  }
+}
+
+function updateScheduleModalMode(existingSlots = null) {
+  const repeat = scheduleRepeatInput.checked;
+  const sameTime = scheduleSameTimeInput.checked;
+
+  scheduleRepeatFields.classList.toggle("is-hidden", !repeat);
+  scheduleOneTimeFields.classList.toggle("is-hidden", repeat);
+
+  scheduleBaseTimeField.classList.toggle(
+    "is-hidden",
+    repeat && !sameTime
+  );
+
+  scheduleDifferentTimes.classList.toggle(
+    "is-hidden",
+    !repeat || sameTime
+  );
+
+  if (repeat && !sameTime) {
+    renderDifferentScheduleTimes(existingSlots);
+  }
+}
+
+function openScheduleModal(options = {}) {
+  if (!savedRecordings.length) {
+    alert("Grave e salve uma automação antes de criar um agendamento.");
+    return;
+  }
+
+  const schedule = options.schedule || null;
+  currentScheduleId = schedule?.id || null;
+
+  populateScheduleAutomationSelect();
+
+  const automationId =
+    schedule?.automationId ||
+    options.automationId ||
+    savedRecordings[0]?.id ||
+    "";
+
+  scheduleAutomationSelect.value = automationId;
+  scheduleRepeatInput.checked = schedule ? Boolean(schedule.repeat) : true;
+  scheduleVisibleInput.checked = schedule ? schedule.visible !== false : true;
+  scheduleSameTimeInput.checked = true;
+
+  let selectedDays = [];
+  let baseTime = options.time || "09:00";
+
+  if (schedule?.repeat) {
+    selectedDays = [...new Set((schedule.slots || []).map((slot) => slot.weekday))];
+
+    const uniqueTimes = [
+      ...new Set((schedule.slots || []).map((slot) => slot.time)),
+    ];
+
+    if (uniqueTimes.length === 1) {
+      baseTime = uniqueTimes[0];
+      scheduleSameTimeInput.checked = true;
+    } else {
+      scheduleSameTimeInput.checked = false;
+    }
+  } else if (Number.isInteger(options.weekday)) {
+    selectedDays = [options.weekday];
+  }
+
+  if (!selectedDays.length && Number.isInteger(options.weekday)) {
+    selectedDays = [options.weekday];
+  }
+
+  if (!selectedDays.length) {
+    selectedDays = [new Date().getDay()];
+  }
+
+  scheduleBaseTimeInput.value = baseTime;
+  scheduleOneTimeInput.value =
+    schedule?.oneTime ||
+    options.time ||
+    "09:00";
+
+  scheduleDateInput.value =
+    schedule?.runDate ||
+    nextDateForWeekday(
+      Number.isInteger(options.weekday)
+        ? options.weekday
+        : selectedDays[0]
+    );
+
+  buildScheduleDayPicker(selectedDays);
+  updateScheduleModalMode(schedule?.slots || null);
+
+  scheduleDeleteButton.classList.toggle("is-hidden", !schedule);
+  scheduleModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => scheduleAutomationSelect.focus());
+}
+
+function closeScheduleModal() {
+  scheduleModal.classList.add("is-hidden");
+  currentScheduleId = null;
+}
+
+function renderScheduleMap() {
+  scheduleMap.innerHTML = "";
+
+  const corner = document.createElement("div");
+  corner.className = "schedule-map-head schedule-map-corner";
+  corner.textContent = "Hora";
+  scheduleMap.appendChild(corner);
+
+  for (const day of WEEK_DAYS) {
+    const header = document.createElement("div");
+    header.className = "schedule-map-head";
+    header.textContent = day.short;
+    scheduleMap.appendChild(header);
+  }
+
+  for (const hour of SCHEDULE_HOURS) {
+    const timeLabel = document.createElement("div");
+    timeLabel.className = "schedule-time-label";
+    timeLabel.textContent = hour;
+    scheduleMap.appendChild(timeLabel);
+
+    for (const day of WEEK_DAYS) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "schedule-cell";
+      cell.dataset.weekday = String(day.value);
+      cell.dataset.time = hour;
+
+      cell.addEventListener("click", () => {
+        openScheduleModal({
+          weekday: day.value,
+          time: hour,
+        });
+      });
+
+      const schedulesInCell = [];
+
+      for (const schedule of savedSchedules) {
+        if (!schedule.enabled) continue;
+
+        if (schedule.repeat) {
+          for (const slot of schedule.slots || []) {
+            if (
+              slot.weekday === day.value &&
+              slot.time.slice(0, 2) === hour.slice(0, 2)
+            ) {
+              schedulesInCell.push({
+                schedule,
+                time: slot.time,
+              });
+            }
+          }
+        } else if (schedule.runDate && schedule.oneTime) {
+          const date = new Date(schedule.runDate + "T12:00:00");
+
+          if (
+            date.getDay() === day.value &&
+            schedule.oneTime.slice(0, 2) === hour.slice(0, 2)
+          ) {
+            schedulesInCell.push({
+              schedule,
+              time: schedule.oneTime,
+            });
+          }
+        }
+      }
+
+      for (const item of schedulesInCell.slice(0, 3)) {
+        const chip = document.createElement("span");
+        chip.className = "schedule-chip";
+        chip.innerHTML =
+          "<strong>" + escapeHtml(item.time) + "</strong>" +
+          "<span>" + escapeHtml(item.schedule.name) + "</span>";
+
+        chip.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openScheduleModal({
+            schedule: item.schedule,
+          });
+        });
+
+        cell.appendChild(chip);
+      }
+
+      scheduleMap.appendChild(cell);
+    }
+  }
+}
+
+function renderScheduleList() {
+  scheduleList.innerHTML = "";
+  scheduleCount.textContent = String(savedSchedules.length);
+
+  if (!savedSchedules.length) {
+    scheduleList.innerHTML =
+      '<p class="empty">Nenhum agendamento configurado.</p>';
+    return;
+  }
+
+  for (const schedule of savedSchedules) {
+    const automation = savedRecordings.find(
+      (recording) => recording.id === schedule.automationId
+    );
+
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "schedule-list-item";
+
+    const when = schedule.repeat
+      ? (schedule.slots || [])
+          .map((slot) => {
+            const day = WEEK_DAYS.find((item) => item.value === slot.weekday);
+            return (day?.short || "?") + " " + slot.time;
+          })
+          .join(" · ")
+      : (schedule.runDate || "—") + " " + (schedule.oneTime || "");
+
+    card.innerHTML =
+      '<div class="schedule-list-item__top">' +
+        "<strong>" + escapeHtml(automation?.name || schedule.name) + "</strong>" +
+        '<span class="' + (schedule.enabled ? "is-on" : "is-off") + '">' +
+          (schedule.enabled ? "Ativo" : "Pausado") +
+        "</span>" +
+      "</div>" +
+      "<p>" + escapeHtml(when) + "</p>" +
+      "<small>" +
+        (schedule.visible ? "Visível" : "Background") +
+        " · " +
+        (schedule.repeat ? "Repete" : "Uma vez") +
+      "</small>";
+
+    card.addEventListener("click", () =>
+      openScheduleModal({
+        schedule,
+      })
+    );
+
+    scheduleList.appendChild(card);
+  }
+}
+
+async function refreshSchedules() {
+  savedSchedules = await ipcRenderer.invoke("schedules:list");
+  renderScheduleMap();
+  renderScheduleList();
+  renderAutomationLibraries();
+
+  if (currentRecording) {
+    const count = savedSchedules.filter(
+      (schedule) => schedule.automationId === currentRecording.id
+    ).length;
+
+    editorScheduleCount.textContent = count
+      ? count + " agendamento" + (count === 1 ? "" : "s")
+      : "Sem agendamentos";
+  }
+}
+
+function renderRuns(runs) {
+  runsList.innerHTML = "";
+  runsEmpty.classList.toggle("is-hidden", runs.length > 0);
+
+  for (const run of runs) {
+    const item = document.createElement("article");
+    item.className = "run-card surface-card";
+
+    const statusClass =
+      run.status === "success"
+        ? "success"
+        : run.status === "error"
+          ? "error"
+          : "working";
+
+    item.innerHTML =
+      '<div class="run-card__status ' + statusClass + '"></div>' +
+      '<div class="run-card__copy">' +
+        "<strong>" + escapeHtml(run.automationName || "Automação") + "</strong>" +
+        "<span>" +
+          (run.source === "schedule" ? "Agendada" : "Manual") +
+          " · " +
+          (run.visible ? "Visível" : "Background") +
+        "</span>" +
+      "</div>" +
+      '<div class="run-card__time">' +
+        "<strong>" + escapeHtml(run.status) + "</strong>" +
+        "<span>" + escapeHtml(formatDateTime(run.startedAt)) + "</span>" +
+      "</div>";
+
+    if (run.error) {
+      item.title = run.error;
+    }
+
+    runsList.appendChild(item);
+  }
+}
+
+async function refreshRuns() {
+  const runs = await ipcRenderer.invoke("runs:list");
+  renderRuns(runs);
+}
+
+async function refreshPersistentData() {
+  const [recordings, schedules, runs] = await Promise.all([
+    ipcRenderer.invoke("recordings:list"),
+    ipcRenderer.invoke("schedules:list"),
+    ipcRenderer.invoke("runs:list"),
+  ]);
+
+  savedRecordings = recordings;
+  savedSchedules = schedules;
+
+  renderAutomationLibraries();
+  populateScheduleAutomationSelect();
+  renderScheduleMap();
+  renderScheduleList();
+  renderRuns(runs);
+}
+
+function videoSegmentForPage(pageId) {
+  const segments = currentRecording?.videoSegments || [];
+
+  if (pageId) {
+    const exact = segments.find((segment) => segment.pageId === pageId);
+    if (exact?.videoUrl) return exact;
+  }
+
+  return segments.find((segment) => segment.videoUrl) || null;
+}
+
+function setEditorVideoPage(pageId, seekSeconds = null, autoplay = false) {
+  if (!currentRecording) return;
+
+  const segment = videoSegmentForPage(pageId);
+  const url = segment?.videoUrl || currentRecording.videoUrl || null;
+
+  if (!url) {
+    recordingVideo.pause();
+    recordingVideo.removeAttribute("src");
+    recordingVideo.load();
+    recordingVideo.classList.add("is-hidden");
+    videoMissing.classList.remove("is-hidden");
+    currentVideoPageId = null;
+    return;
+  }
+
+  const resolvedPageId = segment?.pageId || pageId || "primary";
+
+  if (Number.isFinite(seekSeconds)) {
+    pendingVideoSeekSeconds = Math.max(0, Number(seekSeconds));
+  } else {
+    pendingVideoSeekSeconds = 0;
+  }
+
+  if (
+    currentVideoPageId === resolvedPageId &&
+    recordingVideo.src === url
+  ) {
+    if (Number.isFinite(seekSeconds)) {
+      const total = Number(recordingVideo.duration) || 0;
+      if (total) {
+        recordingVideo.currentTime = Math.min(total, pendingVideoSeekSeconds);
+      }
+    }
+
+    if (autoplay) {
+      void recordingVideo.play().catch(() => undefined);
+    }
+
+    return;
+  }
+
+  currentVideoPageId = resolvedPageId;
+  recordingVideo.dataset.autoplayAfterLoad = autoplay ? "1" : "0";
+  recordingVideo.pause();
+  recordingVideo.src = url;
+  recordingVideo.load();
+  recordingVideo.classList.remove("is-hidden");
+  videoMissing.classList.add("is-hidden");
+}
+
+function sortedVideoSegments() {
+  return [...(currentRecording?.videoSegments || [])]
+    .filter((segment) => segment.videoUrl)
+    .sort((a, b) => (Number(a.startedAtMs) || 0) - (Number(b.startedAtMs) || 0));
+}
+
+function currentEditorSegment() {
+  return sortedVideoSegments().find(
+    (segment) => segment.pageId === currentVideoPageId
+  ) || null;
+}
+
+function setEditorGlobalTimeMs(globalMs, autoplay = false) {
+  const targetMs = Math.max(0, Number(globalMs) || 0);
+  const segments = sortedVideoSegments();
+
+  if (!segments.length) {
+    const total = Number(recordingVideo.duration) || 0;
+    if (total) {
+      recordingVideo.currentTime = Math.min(total, targetMs / 1000);
+      if (autoplay) void recordingVideo.play().catch(() => undefined);
+    }
+    return;
+  }
+
+  let segment = segments[0];
+
+  for (const candidate of segments) {
+    if ((Number(candidate.startedAtMs) || 0) <= targetMs) {
+      segment = candidate;
+    } else {
+      break;
+    }
+  }
+
+  const relativeSeconds = Math.max(
+    0,
+    (targetMs - (Number(segment.startedAtMs) || 0)) / 1000
+  );
+
+  setEditorVideoPage(segment.pageId, relativeSeconds, autoplay);
+}
+
 
 const SPEED_VALUES = [1, 1.5, 2];
 const speedGaugeControllers = new WeakMap();
@@ -486,11 +1209,21 @@ function setCurrentExecutionSpeed(speed, source = "editor") {
 
 function updateVideoUI() {
   const current = Number(recordingVideo.currentTime) || 0;
-  const total = Number(recordingVideo.duration) || 0;
-  const fraction = total > 0 ? Math.min(1, Math.max(0, current / total)) : 0;
+  const segment = currentEditorSegment();
+  const segmentStartMs = Number(segment?.startedAtMs) || 0;
+  const globalCurrentMs = segmentStartMs + current * 1000;
+  const totalGlobalMs = Math.max(
+    timelineActionDurationMs,
+    globalCurrentMs,
+    (Number(recordingVideo.duration) || 0) * 1000
+  );
+  const fraction =
+    totalGlobalMs > 0
+      ? Math.min(1, Math.max(0, globalCurrentMs / totalGlobalMs))
+      : 0;
 
-  playerCurrent.textContent = formatClock(current);
-  playerTotal.textContent = formatClock(total);
+  playerCurrent.textContent = formatClock(globalCurrentMs / 1000);
+  playerTotal.textContent = formatClock(totalGlobalMs / 1000);
   playerProgress.value = String(Math.round(fraction * 1000));
   playerProgress.style.setProperty("--progress", fraction * 100 + "%");
 
@@ -498,6 +1231,26 @@ function updateVideoUI() {
   timelinePlay.textContent = recordingVideo.paused ? "▶" : "❚❚";
 
   timelinePlayhead.style.left = fraction * 100 + "%";
+
+  if (!recordingVideo.paused && segment) {
+    const segments = sortedVideoSegments();
+    const index = segments.findIndex(
+      (candidate) => candidate.pageId === segment.pageId
+    );
+    const next = index >= 0 ? segments[index + 1] : null;
+
+    if (
+      next &&
+      globalCurrentMs + 80 >= (Number(next.startedAtMs) || 0)
+    ) {
+      const relativeSeconds = Math.max(
+        0,
+        (globalCurrentMs - (Number(next.startedAtMs) || 0)) / 1000
+      );
+
+      setEditorVideoPage(next.pageId, relativeSeconds, true);
+    }
+  }
 }
 
 function togglePlayback() {
@@ -511,13 +1264,19 @@ function togglePlayback() {
 }
 
 function seekRelative(deltaSeconds) {
-  const total = Number(recordingVideo.duration) || 0;
-  if (!total) return;
-
-  recordingVideo.currentTime = Math.max(
+  const segment = currentEditorSegment();
+  const segmentStartMs = Number(segment?.startedAtMs) || 0;
+  const currentGlobalMs =
+    segmentStartMs + (Number(recordingVideo.currentTime) || 0) * 1000;
+  const targetMs = Math.max(
     0,
-    Math.min(total, (Number(recordingVideo.currentTime) || 0) + deltaSeconds)
+    Math.min(
+      timelineActionDurationMs,
+      currentGlobalMs + deltaSeconds * 1000
+    )
   );
+
+  setEditorGlobalTimeMs(targetMs, !recordingVideo.paused);
 }
 
 function applyTimelineZoom() {
@@ -564,10 +1323,7 @@ function renderTimeline() {
       event.stopPropagation();
       selectAction(action.id);
 
-      const videoTotal = Number(recordingVideo.duration) || 0;
-      if (videoTotal) {
-        recordingVideo.currentTime = Math.min(videoTotal, times[index] / 1000);
-      }
+      setEditorGlobalTimeMs(times[index]);
     });
 
     timelineActions.appendChild(button);
@@ -608,6 +1364,7 @@ function selectAction(actionId) {
   inspectorValue.value = action.isSecret ? "" : action.value || "";
 
   deleteActionButton.disabled = false;
+  setEditorVideoPage(action.pageId);
   renderTimeline();
 }
 
@@ -640,12 +1397,22 @@ function loadEditor(recording) {
   selectedActionId = currentRecording.actions?.[0]?.id || null;
   timelineZoom = 1;
 
-  editorEmpty.classList.add("is-hidden");
+  automationLibrarySection.classList.add("is-hidden");
   editorWorkspace.classList.remove("is-hidden");
+  editorLibraryButton.classList.remove("is-hidden");
+  saveEditorButton.classList.remove("is-hidden");
   editorTitle.textContent = currentRecording.name || "Gravação";
 
   saveEditorButton.disabled = false;
   setCurrentExecutionSpeed(currentRecording.executionSpeed, "load");
+
+  const editorSchedules = savedSchedules.filter(
+    (schedule) => schedule.automationId === currentRecording.id
+  );
+
+  editorScheduleCount.textContent = editorSchedules.length
+    ? editorSchedules.length + " agendamento" + (editorSchedules.length === 1 ? "" : "s")
+    : "Sem agendamentos";
 
   playerProgress.value = "0";
   playerProgress.style.setProperty("--progress", "0%");
@@ -653,18 +1420,8 @@ function loadEditor(recording) {
   playerTotal.textContent = "0:00";
   timelinePlayhead.style.left = "0%";
 
-  if (recording.videoUrl) {
-    videoMissing.classList.add("is-hidden");
-    recordingVideo.classList.remove("is-hidden");
-    recordingVideo.src = recording.videoUrl;
-    recordingVideo.load();
-  } else {
-    recordingVideo.pause();
-    recordingVideo.removeAttribute("src");
-    recordingVideo.load();
-    recordingVideo.classList.add("is-hidden");
-    videoMissing.classList.remove("is-hidden");
-  }
+  currentVideoPageId = null;
+  setEditorVideoPage(currentRecording.actions?.[0]?.pageId);
 
   selectAction(selectedActionId);
   renderTimeline();
@@ -1091,6 +1848,7 @@ loginForm.addEventListener("submit", async (event) => {
       openPage("home", { collapse: false });
       requestAnimationFrame(measureRubber);
       void ensureBrowserProfileOnAccess();
+      void refreshPersistentData();
     }, 110);
   } finally {
     window.setTimeout(() => {
@@ -1273,6 +2031,11 @@ browserSetupModal.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
 
+  if (!scheduleModal.classList.contains("is-hidden")) {
+    closeScheduleModal();
+    return;
+  }
+
   if (!browserSetupModal.classList.contains("is-hidden")) {
     hideBrowserSetup();
     return;
@@ -1294,6 +2057,7 @@ stopButton.addEventListener("click", async () => {
 
     setStatus("Salva · " + result.recording.actions.length + " ações", "success");
 
+    await refreshRecordings();
     loadEditor(result.recording);
     openPage("editor");
   } catch (error) {
@@ -1330,6 +2094,7 @@ saveEditorButton.addEventListener("click", async () => {
     });
 
     currentRecording = result.recording;
+    await refreshRecordings();
     prepareExecution(currentRecording);
     setStatus("Edição salva", "success");
     openPage("execution");
@@ -1381,6 +2146,168 @@ executionStartButton.addEventListener("click", async () => {
   }
 });
 
+
+editorLibraryButton.addEventListener("click", () => {
+  currentRecording = null;
+  selectedActionId = null;
+  showEditorLibrary();
+  void refreshRecordings();
+});
+
+editorScheduleButton.addEventListener("click", () => {
+  if (!currentRecording) return;
+
+  const matches = savedSchedules.filter(
+    (schedule) => schedule.automationId === currentRecording.id
+  );
+
+  openPage("schedules");
+
+  if (matches.length === 0) {
+    openScheduleModal({
+      automationId: currentRecording.id,
+    });
+  } else if (matches.length === 1) {
+    openScheduleModal({
+      schedule: matches[0],
+    });
+  }
+});
+
+scheduleRepeatInput.addEventListener("change", () => {
+  updateScheduleModalMode();
+});
+
+scheduleSameTimeInput.addEventListener("change", () => {
+  updateScheduleModalMode();
+});
+
+scheduleCancelButton.addEventListener("click", closeScheduleModal);
+
+scheduleRefreshButton.addEventListener("click", () => {
+  void Promise.all([refreshRecordings(), refreshSchedules()]);
+});
+
+scheduleSaveButton.addEventListener("click", async () => {
+  const automationId = scheduleAutomationSelect.value;
+  const automation = savedRecordings.find(
+    (recording) => recording.id === automationId
+  );
+
+  if (!automation) {
+    alert("Escolha uma automação.");
+    return;
+  }
+
+  const repeat = scheduleRepeatInput.checked;
+  const visible = scheduleVisibleInput.checked;
+  let slots = [];
+
+  if (repeat) {
+    const days = selectedScheduleDays();
+
+    if (!days.length) {
+      alert("Escolha pelo menos um dia da semana.");
+      return;
+    }
+
+    if (scheduleSameTimeInput.checked) {
+      slots = days.map((weekday) => ({
+        weekday,
+        time: scheduleBaseTimeInput.value || "09:00",
+      }));
+    } else {
+      slots = days.map((weekday) => {
+        const input = scheduleDifferentTimes.querySelector(
+          'input[data-weekday="' + weekday + '"]'
+        );
+
+        return {
+          weekday,
+          time: input?.value || scheduleBaseTimeInput.value || "09:00",
+        };
+      });
+    }
+  }
+
+  const existing = savedSchedules.find(
+    (schedule) => schedule.id === currentScheduleId
+  );
+
+  const payload = {
+    id: currentScheduleId || undefined,
+    automationId,
+    name: automation.name || "Agendamento",
+    enabled: existing?.enabled !== false,
+    visible,
+    repeat,
+    slots,
+    runDate: repeat ? undefined : scheduleDateInput.value,
+    oneTime: repeat ? undefined : scheduleOneTimeInput.value,
+    createdAt: existing?.createdAt,
+    lastTriggeredKey: existing?.lastTriggeredKey,
+  };
+
+  scheduleSaveButton.disabled = true;
+  scheduleSaveButton.textContent = "Salvando...";
+
+  try {
+    await ipcRenderer.invoke("schedule:save", payload);
+    closeScheduleModal();
+    await refreshSchedules();
+    setStatus("Agendamento salvo", "success");
+  } catch (error) {
+    setStatus("Erro no agendamento", "error");
+    alert(error?.message || String(error));
+  } finally {
+    scheduleSaveButton.disabled = false;
+    scheduleSaveButton.textContent = "Salvar agendamento";
+  }
+});
+
+scheduleDeleteButton.addEventListener("click", async () => {
+  if (!currentScheduleId) return;
+
+  const confirmed = window.confirm("Excluir este agendamento?");
+  if (!confirmed) return;
+
+  try {
+    await ipcRenderer.invoke("schedule:delete", currentScheduleId);
+    closeScheduleModal();
+    await refreshSchedules();
+    setStatus("Agendamento excluído", "success");
+  } catch (error) {
+    setStatus("Erro ao excluir", "error");
+    alert(error?.message || String(error));
+  }
+});
+
+scheduleModal.addEventListener("click", (event) => {
+  if (event.target === scheduleModal) {
+    closeScheduleModal();
+  }
+});
+
+ipcRenderer.on("recordings:changed", () => {
+  void refreshRecordings();
+});
+
+ipcRenderer.on("schedules:changed", () => {
+  void refreshSchedules();
+});
+
+ipcRenderer.on("runs:changed", () => {
+  void refreshRuns();
+});
+
+ipcRenderer.on("schedule:execution-error", (_event, payload) => {
+  setStatus("Agendamento falhou", "error");
+
+  if (payload?.message) {
+    console.error("Scheduled automation failed:", payload.message);
+  }
+});
+
 playerPlay.addEventListener("click", togglePlayback);
 timelinePlay.addEventListener("click", togglePlayback);
 
@@ -1393,11 +2320,9 @@ playerMute.addEventListener("click", () => {
 });
 
 playerProgress.addEventListener("input", () => {
-  const total = Number(recordingVideo.duration) || 0;
-  if (!total) return;
-
   const fraction = Number(playerProgress.value) / 1000;
-  recordingVideo.currentTime = total * fraction;
+  const targetMs = timelineActionDurationMs * fraction;
+  setEditorGlobalTimeMs(targetMs);
   updateVideoUI();
 });
 
@@ -1415,15 +2340,30 @@ timelineCanvas.addEventListener("click", (event) => {
   if (event.target.closest(".timeline-action")) return;
 
   const rect = timelineCanvas.getBoundingClientRect();
-  const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-  const total = Number(recordingVideo.duration) || 0;
+  const fraction = Math.min(
+    1,
+    Math.max(0, (event.clientX - rect.left) / rect.width)
+  );
 
-  if (total) {
-    recordingVideo.currentTime = total * fraction;
-  }
+  setEditorGlobalTimeMs(timelineActionDurationMs * fraction);
 });
 
-recordingVideo.addEventListener("loadedmetadata", updateVideoUI);
+recordingVideo.addEventListener("loadedmetadata", () => {
+  const total = Number(recordingVideo.duration) || 0;
+
+  if (total && pendingVideoSeekSeconds > 0) {
+    recordingVideo.currentTime = Math.min(total, pendingVideoSeekSeconds);
+  }
+
+  const autoplay = recordingVideo.dataset.autoplayAfterLoad === "1";
+  recordingVideo.dataset.autoplayAfterLoad = "0";
+
+  updateVideoUI();
+
+  if (autoplay) {
+    void recordingVideo.play().catch(() => undefined);
+  }
+});
 recordingVideo.addEventListener("timeupdate", updateVideoUI);
 recordingVideo.addEventListener("play", updateVideoUI);
 recordingVideo.addEventListener("pause", updateVideoUI);

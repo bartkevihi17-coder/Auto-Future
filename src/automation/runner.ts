@@ -174,6 +174,33 @@ export async function runRecording(
       await extraPage.close().catch(() => undefined);
     }
 
+    const firstRecordedPageId =
+      recording.actions.find((action) => action.pageId)?.pageId || "p1";
+
+    const pageMap = new Map<string, Page>();
+    pageMap.set(firstRecordedPageId, page);
+
+    const resolvePageForAction = async (action: AutomationAction): Promise<Page> => {
+      if (!action.pageId) return page;
+
+      const mapped = pageMap.get(action.pageId);
+      if (mapped && !mapped.isClosed()) return mapped;
+
+      const usedPages = new Set(pageMap.values());
+      const existingUnmapped = context
+        .pages()
+        .find((candidate) => !candidate.isClosed() && !usedPages.has(candidate));
+
+      if (existingUnmapped) {
+        pageMap.set(action.pageId, existingUnmapped);
+        return existingUnmapped;
+      }
+
+      const created = await context.newPage();
+      pageMap.set(action.pageId, created);
+      return created;
+    };
+
     if (recording.initialUrl && page.url() !== recording.initialUrl) {
       await page.goto(recording.initialUrl, { waitUntil: "domcontentloaded" });
     }
@@ -207,33 +234,34 @@ export async function runRecording(
 
       const recordedDelayMs = Math.max(0, Number(action.delayMs) || 0);
       const delayMs = recordedDelayMs / speed;
+
       if (delayMs > 0) {
-        await page.waitForTimeout(delayMs);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
+
+      const actionPage = await resolvePageForAction(action);
 
       switch (action.type) {
         case "navigate": {
-          if (page.url() !== action.url) {
-            await page.goto(action.url, { waitUntil: "domcontentloaded" });
+          if (actionPage.url() !== action.url) {
+            await actionPage.goto(action.url, { waitUntil: "domcontentloaded" });
           }
           break;
         }
 
         case "click": {
-          await clickAction(page, action);
+          await clickAction(actionPage, action);
           break;
         }
 
         case "input": {
-          if (!action.selector) break;
-
           if (action.isSecret) {
             throw new Error(
               "A gravacao contem um campo secreto. Variaveis seguras ainda nao foram configuradas."
             );
           }
 
-          await inputAction(page, action);
+          await inputAction(actionPage, action);
           break;
         }
       }
