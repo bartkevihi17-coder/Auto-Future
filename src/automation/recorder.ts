@@ -29,6 +29,7 @@ export class BrowserRecorder {
   private pageSequence = 0;
   private pageIds = new Map<Page, string>();
   private trackedPages = new Map<Page, { pageId: string; startedAtMs: number }>();
+  private lastRecordedUrlByPage = new Map<string, string>();
 
   constructor(
     private readonly videoDir: string,
@@ -52,6 +53,7 @@ export class BrowserRecorder {
     this.pageSequence = 0;
     this.pageIds.clear();
     this.trackedPages.clear();
+    this.lastRecordedUrlByPage.clear();
 
     const launchArgs = [
       "--no-first-run",
@@ -117,19 +119,38 @@ export class BrowserRecorder {
         y?: number;
       };
 
+      const sourcePage = source.page ?? source.frame.page();
+
+      if (sourcePage && !this.pageIds.has(sourcePage)) {
+        this.registerPage(sourcePage);
+      }
+
+      if (sourcePage) {
+        this.page = sourcePage;
+      }
+
+      const sourceUrl = data.url ?? source.frame.url() ?? sourcePage?.url() ?? initialUrl;
+
+      if (data.type === "navigate") {
+        if (sourcePage) {
+          this.recordNavigation(sourcePage, sourceUrl);
+        }
+        return;
+      }
+
       if (data.type !== "click" && data.type !== "input") return;
 
       this.recordAction({
         type: data.type,
         selector: data.selector,
         value: data.value,
-        url: data.url ?? source.frame.url() ?? this.page?.url() ?? initialUrl,
+        url: sourceUrl,
         isSecret: Boolean(data.isSecret),
         frameUrl: source.frame.url(),
         frameName: source.frame.name() || undefined,
         x: Number.isFinite(data.x) ? Number(data.x) : undefined,
         y: Number.isFinite(data.y) ? Number(data.y) : undefined,
-        pageId: source.page ? this.pageIds.get(source.page) : undefined,
+        pageId: sourcePage ? this.pageIds.get(sourcePage) : undefined,
       });
     });
 
@@ -229,15 +250,59 @@ export class BrowserRecorder {
     }
   };
 
+  let lastUrl = location.href;
+
+  const reportNavigationIfChanged = () => {
+    const current = location.href;
+    if (!current || current === lastUrl) return;
+    lastUrl = current;
+    send({ type: "navigate" });
+  };
+
+  const originalPushState = history.pushState.bind(history);
+  history.pushState = (...args) => {
+    const result = originalPushState(...args);
+    queueMicrotask(reportNavigationIfChanged);
+    return result;
+  };
+
+  const originalReplaceState = history.replaceState.bind(history);
+  history.replaceState = (...args) => {
+    const result = originalReplaceState(...args);
+    queueMicrotask(reportNavigationIfChanged);
+    return result;
+  };
+
+  window.addEventListener("popstate", reportNavigationIfChanged, true);
+  window.addEventListener("hashchange", reportNavigationIfChanged, true);
+
+  const navigationPoll = window.setInterval(reportNavigationIfChanged, 250);
+  window.addEventListener("pagehide", () => {
+    window.clearInterval(navigationPoll);
+  }, { once: true });
+
   document.addEventListener("click", (event) => {
     const target = eventTarget(event);
     if (!target) return;
-    send({ type: "click", selector: selectorFor(target), ...pointFor(target, event) });
+
+    send({
+      type: "click",
+      selector: selectorFor(target),
+      ...pointFor(target, event)
+    });
+
+    window.setTimeout(reportNavigationIfChanged, 0);
+    window.setTimeout(reportNavigationIfChanged, 120);
+    window.setTimeout(reportNavigationIfChanged, 400);
   }, true);
 
-  document.addEventListener("change", (event) => {
-    const target = eventTarget(event);
+  const inputTimers = new WeakMap();
+
+  const reportInput = (target) => {
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+
+    const pending = inputTimers.get(target);
+    if (pending) window.clearTimeout(pending);
 
     const isSecret = target instanceof HTMLInputElement && target.type === "password";
     send({
@@ -247,6 +312,27 @@ export class BrowserRecorder {
       isSecret,
       ...pointFor(target)
     });
+
+    inputTimers.delete(target);
+  };
+
+  document.addEventListener("input", (event) => {
+    const target = eventTarget(event);
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+
+    const pending = inputTimers.get(target);
+    if (pending) window.clearTimeout(pending);
+
+    const timer = window.setTimeout(() => reportInput(target), 300);
+    inputTimers.set(target, timer);
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    reportInput(eventTarget(event));
+  }, true);
+
+  document.addEventListener("focusout", (event) => {
+    reportInput(eventTarget(event));
   }, true);
 })();
 `,
@@ -300,19 +386,17 @@ export class BrowserRecorder {
     for (const entry of pageVideos) {
       if (!entry.video) continue;
 
-      const rawVideoPath = await entry.video.path().catch(() => null);
-      if (!rawVideoPath) continue;
-
       const finalPath = path.join(
         this.videoDir,
         finished.id + "-" + entry.meta.pageId + ".webm"
       );
 
-      if (rawVideoPath !== finalPath) {
-        await fs.rename(rawVideoPath, finalPath).catch(async () => {
-          await fs.copyFile(rawVideoPath, finalPath);
-        });
-      }
+      const saved = await entry.video
+        .saveAs(finalPath)
+        .then(() => true)
+        .catch(() => false);
+
+      if (!saved) continue;
 
       segments.push({
         pageId: entry.meta.pageId,
@@ -334,6 +418,7 @@ export class BrowserRecorder {
     this.context = null;
     this.pageIds.clear();
     this.trackedPages.clear();
+    this.lastRecordedUrlByPage.clear();
 
     return finished;
   }
@@ -365,13 +450,18 @@ export class BrowserRecorder {
       if (!url || url === "about:blank") return;
 
       this.page = page;
-      this.recordAction({
-        type: "navigate",
-        url,
-        pageId,
-      });
-
+      this.recordNavigation(page, url);
       this.scheduleReadabilityCheck(2500, 0);
+    });
+
+    page.on("domcontentloaded", () => {
+      this.page = page;
+      this.recordNavigation(page, page.url());
+    });
+
+    page.on("load", () => {
+      this.page = page;
+      this.recordNavigation(page, page.url());
     });
 
     page.on("crash", () => {
@@ -390,6 +480,25 @@ export class BrowserRecorder {
 
         if (fallback) this.page = fallback;
       }
+    });
+  }
+
+  private recordNavigation(page: Page, url: string): void {
+    if (!url || url === "about:blank") return;
+
+    const pageId = this.pageIds.get(page);
+    if (!pageId) return;
+
+    const normalized = url.split("#")[0] + (url.includes("#") ? "#" + url.split("#").slice(1).join("#") : "");
+    const previous = this.lastRecordedUrlByPage.get(pageId);
+
+    if (previous === normalized) return;
+
+    this.lastRecordedUrlByPage.set(pageId, normalized);
+    this.recordAction({
+      type: "navigate",
+      url,
+      pageId,
     });
   }
 
@@ -547,6 +656,7 @@ export class BrowserRecorder {
     this.context = null;
     this.pageIds.clear();
     this.trackedPages.clear();
+    this.lastRecordedUrlByPage.clear();
 
     await context?.close().catch(() => undefined);
     this.onUnsupported?.(info);
@@ -564,6 +674,26 @@ export class BrowserRecorder {
     if (!this.recording) return;
 
     const now = Date.now();
+    const previous = this.recording.actions[this.recording.actions.length - 1];
+
+    if (
+      partial.type === "input" &&
+      previous?.type === "input" &&
+      previous.pageId === partial.pageId &&
+      previous.frameUrl === partial.frameUrl &&
+      previous.selector === partial.selector &&
+      now - previous.timestamp <= 2000
+    ) {
+      previous.value = partial.value;
+      previous.isSecret = partial.isSecret;
+      previous.url = partial.url;
+      previous.timestamp = now;
+      previous.x = partial.x;
+      previous.y = partial.y;
+      this.lastTimestamp = now;
+      return;
+    }
+
     const action: AutomationAction = {
       id: randomUUID(),
       type: partial.type,

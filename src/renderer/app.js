@@ -390,6 +390,7 @@ function renderAutomationCard(recording) {
     '<div class="automation-card__actions">' +
       '<button class="button compact automation-edit-button" type="button">Editar</button>' +
       '<button class="button compact automation-schedule-button" type="button">Agendar</button>' +
+      '<button class="button compact danger automation-delete-button" type="button">Excluir</button>' +
     "</div>";
 
   card
@@ -403,6 +404,39 @@ function renderAutomationCard(recording) {
       openScheduleModal({
         automationId: recording.id,
       });
+    });
+
+  card
+    .querySelector(".automation-delete-button")
+    .addEventListener("click", async () => {
+      const confirmed = window.confirm(
+        'Excluir a automação "' + (recording.name || "Automação") +
+        '"? Os agendamentos vinculados a ela também serão removidos.'
+      );
+
+      if (!confirmed) return;
+
+      try {
+        setStatus("Excluindo automação", "working");
+        await ipcRenderer.invoke("recording:delete", recording.id);
+
+        if (currentRecording?.id === recording.id) {
+          currentRecording = null;
+          selectedActionId = null;
+        }
+
+        await Promise.all([refreshRecordings(), refreshSchedules()]);
+
+        const activePage = document.querySelector("[data-page-view].active")?.dataset.pageView;
+        if (activePage === "editor") {
+          showEditorLibrary();
+        }
+
+        setStatus("Automação excluída", "success");
+      } catch (error) {
+        setStatus("Erro ao excluir", "error");
+        alert(error?.message || String(error));
+      }
     });
 
   return card;
