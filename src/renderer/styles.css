@@ -5094,3 +5094,172 @@ body.logged-in .background-tint {
   font-weight: 650;
   line-height: 1.45;
 }
+
+
+/* ===== Qwen AI integration ===== */
+
+.profile-ai-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #ece7f0;
+  border-radius: 10px;
+  padding: 8px 9px;
+  background: #faf8fc;
+}
+
+.profile-ai-status > div {
+  display: grid;
+  gap: 2px;
+}
+
+.profile-ai-status > div > span {
+  color: #948b9a;
+  font-size: 7px;
+  font-weight: 760;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.profile-ai-status > div > strong {
+  color: #3c3344;
+  font-size: 10px;
+}
+
+.profile-ai-status__badge {
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: #8a6970;
+  background: #f3e8eb;
+  font-size: 7px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.profile-ai-status__badge.is-connected {
+  color: #257357;
+  background: #e7f5ee;
+}
+
+.qwen-settings-card {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.qwen-settings-head {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.qwen-settings-logo {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #d8c3f5;
+  border-radius: 13px;
+  color: #6e28bd;
+  background:
+    linear-gradient(145deg, #f7efff, #eee3ff);
+  font-size: 15px;
+  font-weight: 900;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.85),
+    0 6px 18px rgba(101, 43, 174, 0.10);
+}
+
+.qwen-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.qwen-settings-grid .field {
+  display: grid;
+  gap: 5px;
+}
+
+.qwen-settings-grid .field > span {
+  color: #756d7b;
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.qwen-settings-grid select,
+.qwen-settings-grid input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #ddd7e3;
+  border-radius: 9px;
+  padding: 0 10px;
+  color: #342d3b;
+  background: #ffffff;
+  font: inherit;
+  font-size: 9px;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.qwen-settings-grid select:focus,
+.qwen-settings-grid input:focus {
+  border-color: #9b79d7;
+  box-shadow: 0 0 0 3px rgba(122, 53, 216, 0.08);
+}
+
+.qwen-key-field {
+  grid-column: 1 / -1;
+}
+
+.qwen-key-field small {
+  color: #928a98;
+  font-size: 7.5px;
+  line-height: 1.4;
+}
+
+.qwen-test-result {
+  margin-top: 11px;
+  border: 1px solid #e4dee9;
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: #655d6b;
+  background: #faf8fb;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.qwen-test-result.working {
+  color: #5d4b74;
+  border-color: #dac9ef;
+  background: #f8f2ff;
+}
+
+.qwen-test-result.success {
+  color: #236c51;
+  border-color: #cce9dc;
+  background: #eff9f4;
+}
+
+.qwen-test-result.error {
+  color: #9b3e4e;
+  border-color: #efcbd2;
+  background: #fff3f5;
+}
+
+.qwen-settings-note {
+  margin-top: 10px;
+}
+
+@media (max-width: 620px) {
+  .qwen-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qwen-key-field {
+    grid-column: auto;
+  }
+}

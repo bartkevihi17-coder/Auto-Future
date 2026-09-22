@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, Notification } from "electron";
+import { app, BrowserWindow, ipcMain, Notification, safeStorage } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { BrowserRecorder } from "./automation/recorder";
+import { callQwen, QwenRegion } from "./ai/qwen";
 import { runRecording, RunProgressEvent } from "./automation/runner";
 import {
   getBrowserProfileStatus,
@@ -60,6 +61,10 @@ function foldersPath(): string {
   return path.join(stateDir(), "folders.json");
 }
 
+function aiSettingsPath(): string {
+  return path.join(stateDir(), "ai-settings.json");
+}
+
 function browserProfileDir(): string {
   return path.join(app.getPath("userData"), "browser-profile");
 }
@@ -77,6 +82,162 @@ function normalizeOptimization(value: unknown): boolean {
 
 function normalizeNotifications(value: unknown): boolean {
   return value === true;
+}
+
+interface StoredAiSettings {
+  provider: "qwen";
+  region: QwenRegion;
+  model: string;
+  baseUrl: string;
+  encryptedApiKey?: string;
+  updatedAt?: string;
+}
+
+const QWEN_REGION_BASE_URLS: Record<QwenRegion, string> = {
+  us: "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+  singapore: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+};
+
+const DEFAULT_QWEN_MODEL = "qwen3.8-flash";
+
+function normalizeQwenRegion(value: unknown): QwenRegion {
+  return value === "singapore" ? "singapore" : "us";
+}
+
+function qwenBaseUrlForRegion(region: QwenRegion): string {
+  return QWEN_REGION_BASE_URLS[region];
+}
+
+function normalizeQwenModel(value: unknown): string {
+  const model = String(value ?? "").trim();
+  return model || DEFAULT_QWEN_MODEL;
+}
+
+async function readAiSettings(): Promise<StoredAiSettings> {
+  try {
+    const raw = await fs.readFile(aiSettingsPath(), "utf8");
+    const parsed = JSON.parse(raw) as Partial<StoredAiSettings>;
+    const region = normalizeQwenRegion(parsed.region);
+
+    return {
+      provider: "qwen",
+      region,
+      model: normalizeQwenModel(parsed.model),
+      baseUrl: qwenBaseUrlForRegion(region),
+      encryptedApiKey:
+        typeof parsed.encryptedApiKey === "string"
+          ? parsed.encryptedApiKey
+          : undefined,
+      updatedAt:
+        typeof parsed.updatedAt === "string" ? parsed.updatedAt : undefined,
+    };
+  } catch {
+    return {
+      provider: "qwen",
+      region: "us",
+      model: DEFAULT_QWEN_MODEL,
+      baseUrl: qwenBaseUrlForRegion("us"),
+    };
+  }
+}
+
+async function writeAiSettings(settings: StoredAiSettings): Promise<void> {
+  await fs.mkdir(stateDir(), { recursive: true });
+  await fs.writeFile(
+    aiSettingsPath(),
+    JSON.stringify(settings, null, 2),
+    "utf8"
+  );
+}
+
+function decryptStoredApiKey(settings: StoredAiSettings): string {
+  const fromEnv = process.env.DASHSCOPE_API_KEY?.trim();
+
+  if (fromEnv) return fromEnv;
+  if (!settings.encryptedApiKey) return "";
+  if (!safeStorage.isEncryptionAvailable()) return "";
+
+  try {
+    return safeStorage.decryptString(
+      Buffer.from(settings.encryptedApiKey, "base64")
+    );
+  } catch {
+    return "";
+  }
+}
+
+function publicAiSettings(settings: StoredAiSettings) {
+  const apiKey = decryptStoredApiKey(settings);
+
+  return {
+    provider: "qwen",
+    region: settings.region,
+    model: settings.model,
+    baseUrl: settings.baseUrl,
+    configured: Boolean(apiKey),
+    secureStorageAvailable: safeStorage.isEncryptionAvailable(),
+    keySource: process.env.DASHSCOPE_API_KEY?.trim()
+      ? "environment"
+      : apiKey
+        ? "encrypted-local"
+        : "none",
+    updatedAt: settings.updatedAt || null,
+  };
+}
+
+async function saveQwenSettings(payload: {
+  region?: QwenRegion;
+  model?: string;
+  apiKey?: string;
+}): Promise<StoredAiSettings> {
+  const current = await readAiSettings();
+  const region = normalizeQwenRegion(payload.region);
+  const apiKey = String(payload.apiKey ?? "").trim();
+
+  const next: StoredAiSettings = {
+    provider: "qwen",
+    region,
+    model: normalizeQwenModel(payload.model),
+    baseUrl: qwenBaseUrlForRegion(region),
+    encryptedApiKey: current.encryptedApiKey,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (apiKey) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error(
+        "O armazenamento seguro do sistema nao esta disponivel para salvar a chave da Qwen."
+      );
+    }
+
+    next.encryptedApiKey = safeStorage
+      .encryptString(apiKey)
+      .toString("base64");
+  }
+
+  await writeAiSettings(next);
+  return next;
+}
+
+async function getQwenClientSettings(): Promise<{
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}> {
+  const settings = await readAiSettings();
+  const apiKey = decryptStoredApiKey(settings);
+
+  if (!apiKey) {
+    throw new Error(
+      "Configure uma chave da API Qwen antes de testar a conexao."
+    );
+  }
+
+  return {
+    apiKey,
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+  };
 }
 
 const TAG_COLOR_PALETTE = [
@@ -606,6 +767,105 @@ app.whenReady().then(async () => {
 
     return { ok: true };
   });
+
+  ipcMain.handle("ai:qwen:get-settings", async () => {
+    return publicAiSettings(await readAiSettings());
+  });
+
+  ipcMain.handle(
+    "ai:qwen:save-settings",
+    async (
+      _event,
+      payload: {
+        region?: QwenRegion;
+        model?: string;
+        apiKey?: string;
+      }
+    ) => {
+      const settings = await saveQwenSettings(payload || {});
+      return publicAiSettings(settings);
+    }
+  );
+
+  ipcMain.handle("ai:qwen:test", async () => {
+    const settings = await getQwenClientSettings();
+    const startedAt = Date.now();
+
+    const result = await callQwen(
+      settings,
+      [
+        {
+          role: "system",
+          content:
+            "Voce esta conectado ao Auto Future. Responda de forma curta e objetiva.",
+        },
+        {
+          role: "user",
+          content:
+            "Teste de conexao. Responda apenas com: QWEN_OK",
+        },
+      ],
+      {
+        temperature: 0,
+        maxTokens: 32,
+        timeoutMs: 30_000,
+      }
+    );
+
+    return {
+      ok: true,
+      content: result.content,
+      model: result.model || settings.model,
+      latencyMs: Date.now() - startedAt,
+      usage: result.usage || null,
+    };
+  });
+
+  ipcMain.handle(
+    "ai:qwen:chat",
+    async (
+      _event,
+      payload: {
+        prompt?: string;
+        systemPrompt?: string;
+      }
+    ) => {
+      const prompt = String(payload?.prompt || "").trim();
+
+      if (!prompt) {
+        throw new Error("Digite uma instrucao para a Qwen.");
+      }
+
+      const settings = await getQwenClientSettings();
+      const result = await callQwen(
+        settings,
+        [
+          {
+            role: "system",
+            content:
+              String(payload?.systemPrompt || "").trim() ||
+              "Voce e o planejador de automacoes do Auto Future. Responda em portugues do Brasil.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        {
+          temperature: 0.15,
+          maxTokens: 900,
+          timeoutMs: 40_000,
+        }
+      );
+
+      return {
+        ok: true,
+        content: result.content,
+        model: result.model || settings.model,
+        usage: result.usage || null,
+      };
+    }
+  );
 
   ipcMain.handle("folders:list", async () => {
     return readFolders();

@@ -646,10 +646,67 @@
               <span>E-mail</span>
               <strong id="profile-popover-email">admin@autofuture.local</strong>
             </div>
+
+            <div class="profile-ai-status">
+              <div>
+                <span>IA</span>
+                <strong>Qwen</strong>
+              </div>
+              <span id="profile-qwen-status" class="profile-ai-status__badge">Não configurada</span>
+            </div>
+
+            <button id="profile-qwen-settings-button" class="button compact" type="button">Configurar IA</button>
             <button id="profile-logout-button" class="button danger compact" type="button">Sair da conta</button>
           </div>
         </div>
       </nav>
+    </div>
+
+    <div id="qwen-settings-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="qwen-settings-title">
+      <div class="modal-card qwen-settings-card">
+        <div class="qwen-settings-head">
+          <div class="qwen-settings-logo">Q</div>
+          <div class="modal-copy">
+            <p class="eyebrow">INTELIGÊNCIA ARTIFICIAL</p>
+            <h3 id="qwen-settings-title">Conectar Qwen</h3>
+            <p>
+              Esta é a primeira etapa do modo “Criar com IA”. A chave fica criptografada localmente no seu computador.
+            </p>
+          </div>
+        </div>
+
+        <div class="qwen-settings-grid">
+          <label class="field">
+            <span>Região da chave</span>
+            <select id="qwen-region">
+              <option value="us">Estados Unidos · Virgínia</option>
+              <option value="singapore">Singapura · Internacional</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Modelo</span>
+            <input id="qwen-model" type="text" value="qwen3.8-flash" autocomplete="off" spellcheck="false" />
+          </label>
+
+          <label class="field qwen-key-field">
+            <span>API Key</span>
+            <input id="qwen-api-key" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+            <small id="qwen-key-hint">Se já existir uma chave salva, deixe em branco para mantê-la.</small>
+          </label>
+        </div>
+
+        <div id="qwen-test-result" class="qwen-test-result is-hidden" role="status"></div>
+
+        <div class="modal-note qwen-settings-note">
+          Para o primeiro teste usamos a interface compatível com OpenAI do Alibaba Cloud Model Studio. Depois disso, o próximo passo é conectar a Qwen ao mapa da página do navegador.
+        </div>
+
+        <div class="modal-actions">
+          <button id="qwen-settings-cancel" class="button" type="button">Cancelar</button>
+          <button id="qwen-settings-save-test" class="button primary" type="button">Salvar e testar</button>
+        </div>
+      </div>
     </div>
 
     <div id="recording-warning-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="recording-warning-title">

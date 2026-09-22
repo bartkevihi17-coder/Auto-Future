@@ -184,7 +184,18 @@ const profilePopover = document.querySelector("#profile-popover");
 const profilePopoverName = document.querySelector("#profile-popover-name");
 const profilePopoverRole = document.querySelector("#profile-popover-role");
 const profilePopoverEmail = document.querySelector("#profile-popover-email");
+const profileQwenStatus = document.querySelector("#profile-qwen-status");
+const profileQwenSettingsButton = document.querySelector("#profile-qwen-settings-button");
 const profileLogoutButton = document.querySelector("#profile-logout-button");
+
+const qwenSettingsModal = document.querySelector("#qwen-settings-modal");
+const qwenRegion = document.querySelector("#qwen-region");
+const qwenModel = document.querySelector("#qwen-model");
+const qwenApiKey = document.querySelector("#qwen-api-key");
+const qwenKeyHint = document.querySelector("#qwen-key-hint");
+const qwenTestResult = document.querySelector("#qwen-test-result");
+const qwenSettingsCancel = document.querySelector("#qwen-settings-cancel");
+const qwenSettingsSaveTest = document.querySelector("#qwen-settings-save-test");
 
 const rubberTrack = document.querySelector(".rubber-segment");
 const rubberThumb = document.querySelector(".rubber-segment__thumb");
@@ -1427,6 +1438,108 @@ function syncProfilePopover() {
 function closeProfilePopover() {
   profilePopover.classList.add("is-hidden");
   profileDockButton.setAttribute("aria-expanded", "false");
+}
+
+function renderQwenProfileStatus(settings) {
+  const configured = settings?.configured === true;
+
+  profileQwenStatus.textContent = configured ? "Conectada" : "Não configurada";
+  profileQwenStatus.classList.toggle("is-connected", configured);
+}
+
+async function refreshQwenProfileStatus() {
+  try {
+    const settings = await ipcRenderer.invoke("ai:qwen:get-settings");
+    renderQwenProfileStatus(settings);
+    return settings;
+  } catch {
+    renderQwenProfileStatus(null);
+    return null;
+  }
+}
+
+function setQwenTestResult(kind, message) {
+  qwenTestResult.className = "qwen-test-result " + kind;
+  qwenTestResult.textContent = message;
+}
+
+function closeQwenSettingsModal() {
+  qwenSettingsModal.classList.add("is-hidden");
+  qwenSettingsSaveTest.disabled = false;
+  qwenSettingsCancel.disabled = false;
+  qwenSettingsSaveTest.textContent = "Salvar e testar";
+  qwenApiKey.value = "";
+}
+
+async function openQwenSettingsModal() {
+  closeProfilePopover();
+  qwenTestResult.className = "qwen-test-result is-hidden";
+  qwenTestResult.textContent = "";
+  qwenApiKey.value = "";
+
+  try {
+    const settings = await ipcRenderer.invoke("ai:qwen:get-settings");
+
+    qwenRegion.value = settings?.region || "us";
+    qwenModel.value = settings?.model || "qwen3.8-flash";
+
+    qwenKeyHint.textContent = settings?.configured
+      ? "Já existe uma chave salva. Deixe em branco para mantê-la."
+      : settings?.secureStorageAvailable
+        ? "A chave será criptografada localmente pelo sistema."
+        : "O armazenamento seguro não está disponível neste computador.";
+
+    renderQwenProfileStatus(settings);
+  } catch (error) {
+    setQwenTestResult("error", error?.message || String(error));
+  }
+
+  qwenSettingsModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => qwenApiKey.focus());
+}
+
+async function saveAndTestQwen() {
+  qwenSettingsSaveTest.disabled = true;
+  qwenSettingsCancel.disabled = true;
+  qwenSettingsSaveTest.textContent = "Testando...";
+  setQwenTestResult("working", "Salvando configuração e chamando a Qwen...");
+
+  try {
+    const saved = await ipcRenderer.invoke("ai:qwen:save-settings", {
+      region: qwenRegion.value,
+      model: qwenModel.value,
+      apiKey: qwenApiKey.value,
+    });
+
+    renderQwenProfileStatus(saved);
+
+    const result = await ipcRenderer.invoke("ai:qwen:test");
+    const latency = Number(result?.latencyMs) || 0;
+    const reply = String(result?.content || "").trim();
+    const model = result?.model || qwenModel.value;
+
+    setQwenTestResult(
+      "success",
+      "Conexão confirmada · " +
+        model +
+        " · " +
+        latency +
+        " ms · resposta: " +
+        (reply || "OK")
+    );
+
+    qwenApiKey.value = "";
+    qwenKeyHint.textContent =
+      "Chave salva com segurança. Deixe em branco para mantê-la.";
+    setStatus("Qwen conectada", "success");
+  } catch (error) {
+    setQwenTestResult("error", error?.message || String(error));
+    setStatus("Falha ao conectar Qwen", "error");
+  } finally {
+    qwenSettingsSaveTest.disabled = false;
+    qwenSettingsCancel.disabled = false;
+    qwenSettingsSaveTest.textContent = "Salvar e testar";
+  }
 }
 
 function renderFolderCard(folder, surface) {
@@ -3370,6 +3483,7 @@ profileDockButton.addEventListener("click", (event) => {
 
   if (opening) {
     syncProfilePopover();
+    void refreshQwenProfileStatus();
   }
 
   profilePopover.classList.toggle("is-hidden", !opening);
@@ -3390,6 +3504,22 @@ async function performLogout() {
   document.body.classList.remove("logged-in");
   loginPassword.value = "";
 }
+
+profileQwenSettingsButton.addEventListener("click", () => {
+  void openQwenSettingsModal();
+});
+
+qwenSettingsCancel.addEventListener("click", closeQwenSettingsModal);
+
+qwenSettingsSaveTest.addEventListener("click", () => {
+  void saveAndTestQwen();
+});
+
+qwenSettingsModal.addEventListener("click", (event) => {
+  if (event.target === qwenSettingsModal) {
+    closeQwenSettingsModal();
+  }
+});
 
 profileLogoutButton.addEventListener("click", () => {
   void performLogout();
@@ -3601,6 +3731,11 @@ browserSetupModal.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+
+  if (!qwenSettingsModal.classList.contains("is-hidden")) {
+    closeQwenSettingsModal();
+    return;
+  }
 
   if (!automationDetailsModal.classList.contains("is-hidden")) {
     closeAutomationDetails();
