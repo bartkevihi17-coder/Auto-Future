@@ -43,54 +43,6 @@
     </section>
 
     <div id="app-shell" class="app-shell is-hidden">
-      <aside id="sidebar" class="sidebar" aria-label="Menu lateral">
-        <div class="sidebar-head sidebar-head--minimal">
-          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Recolher menu">
-            <span>‹</span>
-          </button>
-        </div>
-
-        <nav id="line-sidebar" class="line-sidebar">
-          <ul class="line-sidebar__list">
-            <li class="line-sidebar__item active" data-page="home">
-              <span class="line-sidebar__marker"></span>
-              <button class="line-sidebar__label" type="button" data-page="home">Início</button>
-            </li>
-            <li class="line-sidebar__item" data-page="recording">
-              <span class="line-sidebar__marker"></span>
-              <button class="line-sidebar__label" type="button" data-page="recording">Gravar</button>
-            </li>
-            <li class="line-sidebar__item" data-page="editor">
-              <span class="line-sidebar__marker"></span>
-              <button class="line-sidebar__label" type="button" data-page="editor">Editor</button>
-            </li>
-            <li class="line-sidebar__item" data-page="recordings">
-              <span class="line-sidebar__marker"></span>
-              <button class="line-sidebar__label" type="button" data-page="recordings">Gravações</button>
-            </li>
-            <li class="line-sidebar__item" data-page="schedules">
-              <span class="line-sidebar__marker"></span>
-              <button class="line-sidebar__label" type="button" data-page="schedules">Agendamentos</button>
-            </li>
-            <li class="line-sidebar__item" data-page="runs">
-              <span class="line-sidebar__marker"></span>
-              <button class="line-sidebar__label" type="button" data-page="runs">Histórico</button>
-            </li>
-          </ul>
-        </nav>
-
-        <div class="sidebar-spacer"></div>
-
-        <div class="profile">
-          <div class="avatar">A</div>
-          <div class="profile-copy">
-            <strong>Administrador</strong>
-            <small>Admin</small>
-          </div>
-          <button id="logout-button" class="icon-button" type="button" aria-label="Sair">↗</button>
-        </div>
-      </aside>
-
       <main class="workspace">
         <header class="topbar">
           <div>
@@ -222,9 +174,31 @@
               <div>
                 <p class="eyebrow">AUTOMAÇÕES SALVAS</p>
                 <h3>Continue de onde parou</h3>
-                <p>As automações ficam salvas fora da instalação e permanecem após atualizações do app.</p>
+                <p>Organize suas automações em pastas e tags sem perder nada após atualizações.</p>
               </div>
-              <strong id="automation-library-count">0</strong>
+              <div class="library-heading-actions">
+                <strong id="automation-library-count">0</strong>
+                <button id="editor-create-folder-button" class="button compact" type="button">+ Nova pasta</button>
+              </div>
+            </div>
+
+            <section class="folder-zone">
+              <div class="folder-zone__title">
+                <span>Pastas</span>
+                <small>Arraste uma automação e solte sobre uma pasta.</small>
+              </div>
+              <div id="editor-folder-grid" class="folder-grid"></div>
+            </section>
+
+            <div id="editor-folder-context" class="folder-context is-hidden">
+              <div>
+                <span>PASTA ABERTA</span>
+                <strong id="editor-folder-context-name"></strong>
+              </div>
+              <div class="folder-context__actions">
+                <button id="editor-folder-remove-drop" class="folder-out-drop" type="button">Solte aqui para tirar da pasta</button>
+                <button id="editor-folder-close" class="button compact" type="button">Fechar pasta</button>
+              </div>
             </div>
 
             <div id="automation-library" class="automation-library"></div>
@@ -490,6 +464,29 @@
             </div>
           </div>
 
+          <div class="library-page-tools">
+            <button id="recordings-create-folder-button" class="button compact" type="button">+ Nova pasta</button>
+          </div>
+
+          <section class="folder-zone">
+            <div class="folder-zone__title">
+              <span>Pastas</span>
+              <small>Pastas sempre aparecem antes das automações.</small>
+            </div>
+            <div id="recordings-folder-grid" class="folder-grid"></div>
+          </section>
+
+          <div id="recordings-folder-context" class="folder-context is-hidden">
+            <div>
+              <span>PASTA ABERTA</span>
+              <strong id="recordings-folder-context-name"></strong>
+            </div>
+            <div class="folder-context__actions">
+              <button id="recordings-folder-remove-drop" class="folder-out-drop" type="button">Solte aqui para tirar da pasta</button>
+              <button id="recordings-folder-close" class="button compact" type="button">Fechar pasta</button>
+            </div>
+          </div>
+
           <div id="recordings-library" class="automation-library"></div>
           <div id="recordings-library-empty" class="placeholder surface-card is-hidden">
             <span class="placeholder-icon">▤</span>
@@ -557,13 +554,38 @@
       </main>
 
       <nav class="rubber-dock" aria-label="Atalhos principais">
-        <div class="rubber-segment" role="radiogroup" aria-label="Navegação principal" data-held="false">
+        <div class="rubber-segment dock-nav" role="radiogroup" aria-label="Navegação principal">
           <div class="rubber-segment__thumb" aria-hidden="true"></div>
-          <button class="rubber-segment__item active" type="button" role="radio" aria-checked="true" data-page="home">Início</button>
-          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="recording">Gravar</button>
-          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="editor">Editor</button>
-          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="schedules">Agenda</button>
-          <button class="rubber-segment__item" type="button" role="radio" aria-checked="false" data-page="runs">Histórico</button>
+
+          <button class="rubber-segment__item dock-nav-item active" type="button" role="radio" aria-checked="true" data-page="home" aria-label="Início">
+            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><path d="M3.5 10.5 12 3l8.5 7.5v9a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M9 21v-7h6v7"/></svg></span>
+            <span class="dock-nav-label">Início</span>
+          </button>
+
+          <button class="rubber-segment__item dock-nav-item" type="button" role="radio" aria-checked="false" data-page="recording" aria-label="Gravar">
+            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></svg></span>
+            <span class="dock-nav-label">Gravar</span>
+          </button>
+
+          <button class="rubber-segment__item dock-nav-item" type="button" role="radio" aria-checked="false" data-page="editor" aria-label="Editor">
+            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h10"/><path d="M18 7h2"/><circle cx="16" cy="7" r="2"/><path d="M4 17h2"/><path d="M10 17h10"/><circle cx="8" cy="17" r="2"/><path d="M4 12h5"/><path d="M13 12h7"/><circle cx="11" cy="12" r="2"/></svg></span>
+            <span class="dock-nav-label">Editor</span>
+          </button>
+
+          <button class="rubber-segment__item dock-nav-item" type="button" role="radio" aria-checked="false" data-page="recordings" aria-label="Gravações">
+            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h6"/></svg></span>
+            <span class="dock-nav-label">Gravações</span>
+          </button>
+
+          <button class="rubber-segment__item dock-nav-item" type="button" role="radio" aria-checked="false" data-page="schedules" aria-label="Agendamentos">
+            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="15" rx="2"/><path d="M7 3v5M17 3v5M3.5 10h17"/><path d="M8 14h3M13 14h3M8 17h3"/></svg></span>
+            <span class="dock-nav-label">Agenda</span>
+          </button>
+
+          <button class="rubber-segment__item dock-nav-item" type="button" role="radio" aria-checked="false" data-page="runs" aria-label="Histórico">
+            <span class="dock-nav-icon"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M12 7v5l3 2"/></svg></span>
+            <span class="dock-nav-label">Histórico</span>
+          </button>
         </div>
 
         <div class="notification-dock-wrap">
@@ -583,6 +605,27 @@
             <div id="notification-list" class="notification-list">
               <p class="empty">Nenhuma notificação.</p>
             </div>
+          </div>
+        </div>
+
+        <div class="profile-dock-wrap">
+          <button id="profile-dock-button" class="profile-dock-button" type="button" aria-label="Perfil" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c.8-4.2 3.3-6.3 7.5-6.3s6.7 2.1 7.5 6.3"/></svg>
+          </button>
+
+          <div id="profile-popover" class="profile-popover is-hidden">
+            <div class="profile-popover__identity">
+              <div class="profile-popover__avatar">A</div>
+              <div>
+                <strong id="profile-popover-name">Administrador</strong>
+                <span id="profile-popover-role">Administrador</span>
+              </div>
+            </div>
+            <div class="profile-popover__data">
+              <span>E-mail</span>
+              <strong id="profile-popover-email">admin@autofuture.local</strong>
+            </div>
+            <button id="profile-logout-button" class="button danger compact" type="button">Sair da conta</button>
           </div>
         </div>
       </nav>
@@ -802,6 +845,73 @@
         <div class="modal-actions">
           <button id="optimization-modal-cancel" class="button" type="button">Cancelar</button>
           <button id="optimization-modal-confirm" class="button primary" type="button">Entendi</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="folder-create-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="folder-create-title">
+      <div class="modal-card folder-create-card">
+        <div class="modal-copy">
+          <p class="eyebrow">NOVA PASTA</p>
+          <h3 id="folder-create-title">Organize suas automações</h3>
+          <p>Crie uma pasta e depois arraste automações para dentro dela.</p>
+        </div>
+
+        <label class="field">
+          <span>Nome da pasta</span>
+          <input id="folder-create-name" maxlength="48" placeholder="Ex.: Rotinas do SIGE" />
+        </label>
+
+        <div class="modal-actions">
+          <button id="folder-create-cancel" class="button" type="button">Cancelar</button>
+          <button id="folder-create-confirm" class="button primary" type="button">Criar pasta</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="automation-details-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="automation-details-title">
+      <div class="modal-card automation-details-card">
+        <div class="modal-copy">
+          <p class="eyebrow">DETALHES DA AUTOMAÇÃO</p>
+          <h3 id="automation-details-title">Automação</h3>
+          <p id="automation-details-domain">—</p>
+        </div>
+
+        <div class="automation-details-grid">
+          <div>
+            <span>Criada em</span>
+            <strong id="automation-details-created">—</strong>
+          </div>
+          <div>
+            <span>Última execução</span>
+            <strong id="automation-details-last-run">Nunca executada</strong>
+          </div>
+          <div>
+            <span>Tempo médio</span>
+            <strong id="automation-details-average">—</strong>
+          </div>
+          <div>
+            <span>Execuções</span>
+            <strong id="automation-details-runs">0</strong>
+          </div>
+        </div>
+
+        <section class="automation-tags-editor">
+          <div class="automation-tags-editor__head">
+            <div>
+              <span>Tags</span>
+              <small>Até 8 tags por automação.</small>
+            </div>
+          </div>
+          <div id="automation-details-tags" class="automation-tag-list"></div>
+          <div class="automation-tag-add">
+            <input id="automation-details-tag-input" maxlength="28" placeholder="Adicionar tag" />
+            <button id="automation-details-tag-add" class="button compact" type="button">Adicionar</button>
+          </div>
+        </section>
+
+        <div class="modal-actions">
+          <button id="automation-details-close" class="button primary" type="button">Fechar</button>
         </div>
       </div>
     </div>

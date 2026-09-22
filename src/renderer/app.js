@@ -7,9 +7,6 @@ const loginButton = document.querySelector("#login-button");
 const loginEmail = document.querySelector("#login-email");
 const loginPassword = document.querySelector("#login-password");
 
-const sidebarToggle = document.querySelector("#sidebar-toggle");
-const lineSidebar = document.querySelector("#line-sidebar");
-const logoutButton = document.querySelector("#logout-button");
 const pageTitle = document.querySelector("#page-title");
 
 const recordButton = document.querySelector("#record-button");
@@ -143,34 +140,72 @@ const recordingFinalizeLoader = document.querySelector("#recording-finalize-load
 const recordingLoaderLabel = document.querySelector("#recording-loader-label");
 const recordingLoaderTimer = document.querySelector("#recording-loader-timer");
 
+const editorCreateFolderButton = document.querySelector("#editor-create-folder-button");
+const recordingsCreateFolderButton = document.querySelector("#recordings-create-folder-button");
+const editorFolderGrid = document.querySelector("#editor-folder-grid");
+const recordingsFolderGrid = document.querySelector("#recordings-folder-grid");
+const editorFolderContext = document.querySelector("#editor-folder-context");
+const recordingsFolderContext = document.querySelector("#recordings-folder-context");
+const editorFolderContextName = document.querySelector("#editor-folder-context-name");
+const recordingsFolderContextName = document.querySelector("#recordings-folder-context-name");
+const editorFolderRemoveDrop = document.querySelector("#editor-folder-remove-drop");
+const recordingsFolderRemoveDrop = document.querySelector("#recordings-folder-remove-drop");
+const editorFolderClose = document.querySelector("#editor-folder-close");
+const recordingsFolderClose = document.querySelector("#recordings-folder-close");
+
+const folderCreateModal = document.querySelector("#folder-create-modal");
+const folderCreateName = document.querySelector("#folder-create-name");
+const folderCreateCancel = document.querySelector("#folder-create-cancel");
+const folderCreateConfirm = document.querySelector("#folder-create-confirm");
+
+const automationDetailsModal = document.querySelector("#automation-details-modal");
+const automationDetailsTitle = document.querySelector("#automation-details-title");
+const automationDetailsDomain = document.querySelector("#automation-details-domain");
+const automationDetailsCreated = document.querySelector("#automation-details-created");
+const automationDetailsLastRun = document.querySelector("#automation-details-last-run");
+const automationDetailsAverage = document.querySelector("#automation-details-average");
+const automationDetailsRuns = document.querySelector("#automation-details-runs");
+const automationDetailsTags = document.querySelector("#automation-details-tags");
+const automationDetailsTagInput = document.querySelector("#automation-details-tag-input");
+const automationDetailsTagAdd = document.querySelector("#automation-details-tag-add");
+const automationDetailsClose = document.querySelector("#automation-details-close");
+
+const profileDockButton = document.querySelector("#profile-dock-button");
+const profilePopover = document.querySelector("#profile-popover");
+const profilePopoverName = document.querySelector("#profile-popover-name");
+const profilePopoverRole = document.querySelector("#profile-popover-role");
+const profilePopoverEmail = document.querySelector("#profile-popover-email");
+const profileLogoutButton = document.querySelector("#profile-logout-button");
+
 const rubberTrack = document.querySelector(".rubber-segment");
 const rubberThumb = document.querySelector(".rubber-segment__thumb");
 const rubberItems = [...document.querySelectorAll(".rubber-segment__item")];
-const sideItems = [...document.querySelectorAll(".line-sidebar__item")];
 
 let eventCount = 0;
-let sidebarCollapsed = false;
 let currentRecording = null;
 let selectedActionId = null;
 let browserSetupNextAction = "none";
 let savedRecordings = [];
 let savedSchedules = [];
 let savedNotifications = [];
+let savedFolders = [];
 let currentScheduleId = null;
 let currentVideoPageId = null;
 let pendingVideoSeekSeconds = 0;
 let pendingConfirmAction = null;
 let pendingOptimizationEnabled = null;
 let recordingLoaderTimerId = null;
+let recordingLoaderMaxTimerId = null;
 let recordingLoaderStartedAt = 0;
+let currentDetailsRecordingId = null;
+let currentUser = null;
+const activeFolderBySurface = {
+  editor: null,
+  recordings: null,
+};
 let rubberActiveIndex = 0;
 let rubberDrag = null;
 let suppressRubberClick = false;
-
-let sidebarRaf = null;
-let sidebarLast = performance.now();
-const sidebarTargets = sideItems.map((_, index) => (index === 0 ? 1 : 0));
-const sidebarCurrent = [...sidebarTargets];
 
 let timelineZoom = 1;
 let timelineActionDurationMs = 1000;
@@ -232,19 +267,6 @@ function openConfirmModal({
   requestAnimationFrame(() => confirmModalConfirm.focus());
 }
 
-function setSidebarCollapsed(collapsed) {
-  sidebarCollapsed = collapsed;
-  appShell.classList.toggle("sidebar-collapsed", collapsed);
-  sidebarToggle.querySelector("span").textContent = collapsed ? "›" : "‹";
-  sidebarToggle.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu");
-
-  if (!collapsed) startSidebarAnimation();
-}
-
-function collapseSidebarForNavigation() {
-  if (!sidebarCollapsed) setSidebarCollapsed(true);
-}
-
 function pageToRubberIndex(name) {
   const index = rubberItems.findIndex((item) => item.dataset.page === name);
   return index >= 0 ? index : rubberActiveIndex;
@@ -287,12 +309,6 @@ function setRubberIndex(index, animate = true) {
 }
 
 function updateNavigationState(name) {
-  sideItems.forEach((item, index) => {
-    const active = name !== "execution" && item.dataset.page === name;
-    item.classList.toggle("active", active);
-    sidebarTargets[index] = active ? 1 : 0;
-  });
-
   if (name === "execution") {
     rubberItems.forEach((item) => {
       item.classList.remove("active");
@@ -302,8 +318,6 @@ function updateNavigationState(name) {
   } else {
     setRubberIndex(pageToRubberIndex(name));
   }
-
-  startSidebarAnimation();
 }
 
 function openPage(name, options = {}) {
@@ -315,10 +329,6 @@ function openPage(name, options = {}) {
 
   pageTitle.textContent = pageNames[name];
   updateNavigationState(name);
-
-  if (options.collapse !== false) {
-    collapseSidebarForNavigation();
-  }
 
   if (name === "editor") {
     void refreshRecordings();
@@ -550,13 +560,63 @@ function setFinalizeLoader(status, label) {
 }
 
 function showFinalizeLoader() {
+  if (recordingLoaderMaxTimerId) {
+    clearTimeout(recordingLoaderMaxTimerId);
+    recordingLoaderMaxTimerId = null;
+  }
+
   setFinalizeLoader("working", "Finalizando gravação");
   recordingFinalizeLoader.classList.remove("is-hidden");
+
+  recordingLoaderMaxTimerId = window.setTimeout(() => {
+    if (!recordingFinalizeLoader.classList.contains("is-hidden")) {
+      recordingFinalizeLoader.classList.add("is-hidden");
+
+      if (recordingLoaderTimerId) {
+        clearInterval(recordingLoaderTimerId);
+        recordingLoaderTimerId = null;
+      }
+
+      setStatus("Finalização continua em segundo plano", "working");
+    }
+
+    recordingLoaderMaxTimerId = null;
+  }, 14_000);
 }
 
 async function finishFinalizeLoader(status, label, delay = 650) {
+  const elapsed = performance.now() - recordingLoaderStartedAt;
+  const minimumVisibleMs = 7_000;
+
+  if (elapsed < minimumVisibleMs) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, minimumVisibleMs - elapsed)
+    );
+  }
+
+  if (recordingFinalizeLoader.classList.contains("is-hidden")) {
+    if (recordingLoaderMaxTimerId) {
+      clearTimeout(recordingLoaderMaxTimerId);
+      recordingLoaderMaxTimerId = null;
+    }
+    return;
+  }
+
   setFinalizeLoader(status, label);
-  await new Promise((resolve) => setTimeout(resolve, delay));
+
+  const elapsedAfterMinimum = performance.now() - recordingLoaderStartedAt;
+  const remainingToMaximum = Math.max(0, 14_000 - elapsedAfterMinimum);
+  const settleDelay = Math.min(delay, remainingToMaximum);
+
+  if (settleDelay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, settleDelay));
+  }
+
+  if (recordingLoaderMaxTimerId) {
+    clearTimeout(recordingLoaderMaxTimerId);
+    recordingLoaderMaxTimerId = null;
+  }
+
   recordingFinalizeLoader.classList.add("is-hidden");
 }
 
@@ -642,9 +702,247 @@ function setupFuseDelete(root, onFuseEnd) {
   });
 }
 
-function renderAutomationCard(recording) {
+function formatDurationMs(value) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+
+  const seconds = ms / 1000;
+  if (seconds < 60) return seconds.toFixed(seconds < 10 ? 1 : 0) + "s";
+
+  const minutes = Math.floor(seconds / 60);
+  const remaining = Math.round(seconds % 60);
+  return minutes + "m " + String(remaining).padStart(2, "0") + "s";
+}
+
+function recordingTags(recording) {
+  return Array.isArray(recording?.tags) ? recording.tags.filter(Boolean) : [];
+}
+
+async function moveRecordingToFolder(recordingId, folderId) {
+  setStatus(folderId ? "Movendo para pasta" : "Removendo da pasta", "working");
+
+  await ipcRenderer.invoke("recording:set-folder", {
+    id: recordingId,
+    folderId: folderId || null,
+  });
+
+  await refreshRecordings();
+  setStatus(folderId ? "Automação movida" : "Automação fora da pasta", "success");
+}
+
+function setupRecordingDropTarget(element, folderId) {
+  element.addEventListener("dragover", (event) => {
+    const types = Array.from(event.dataTransfer?.types || []);
+
+    if (!types.includes("application/x-auto-future-recording")) {
+      return;
+    }
+
+    event.preventDefault();
+    element.classList.add("is-drag-over");
+  });
+
+  element.addEventListener("dragleave", () => {
+    element.classList.remove("is-drag-over");
+  });
+
+  element.addEventListener("drop", (event) => {
+    const recordingId =
+      event.dataTransfer?.getData("application/x-auto-future-recording") ||
+      event.dataTransfer?.getData("text/plain");
+
+    if (!recordingId) return;
+
+    event.preventDefault();
+    element.classList.remove("is-drag-over");
+    void moveRecordingToFolder(recordingId, folderId);
+  });
+}
+
+function setActiveFolder(surface, folderId) {
+  activeFolderBySurface[surface] = folderId || null;
+  renderAutomationLibraries();
+}
+
+function openFolderCreateModal() {
+  folderCreateName.value = "";
+  folderCreateModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => folderCreateName.focus());
+}
+
+function closeFolderCreateModal() {
+  folderCreateModal.classList.add("is-hidden");
+}
+
+function renderAutomationDetailsTags(tags = []) {
+  automationDetailsTags.innerHTML = "";
+
+  if (!tags.length) {
+    automationDetailsTags.innerHTML =
+      '<span class="automation-tag automation-tag--empty">Sem tags</span>';
+    return;
+  }
+
+  for (const tag of tags) {
+    const chip = document.createElement("span");
+    chip.className = "automation-tag automation-tag--editable";
+    chip.innerHTML =
+      "<span>" + escapeHtml(tag) + "</span>" +
+      '<button type="button" aria-label="Remover tag">×</button>';
+
+    chip.querySelector("button").addEventListener("click", () => {
+      const next = tags.filter(
+        (item) =>
+          item.toLocaleLowerCase("pt-BR") !== tag.toLocaleLowerCase("pt-BR")
+      );
+      void updateCurrentDetailsTags(next);
+    });
+
+    automationDetailsTags.appendChild(chip);
+  }
+}
+
+async function updateCurrentDetailsTags(tags) {
+  if (!currentDetailsRecordingId) return;
+
+  const result = await ipcRenderer.invoke("recording:set-tags", {
+    id: currentDetailsRecordingId,
+    tags,
+  });
+
+  const index = savedRecordings.findIndex(
+    (recording) => recording.id === currentDetailsRecordingId
+  );
+
+  if (index >= 0) {
+    savedRecordings[index] = result.recording;
+  }
+
+  renderAutomationDetailsTags(recordingTags(result.recording));
+  renderAutomationLibraries();
+}
+
+async function openAutomationDetails(id) {
+  try {
+    setStatus("Carregando detalhes", "working");
+    const details = await ipcRenderer.invoke("recording:details", id);
+
+    currentDetailsRecordingId = id;
+    automationDetailsTitle.textContent = details.name || "Automação";
+    automationDetailsDomain.textContent =
+      "Domínio base · " + (details.baseDomain || "—");
+    automationDetailsCreated.textContent = details.createdAt
+      ? formatDateTime(details.createdAt)
+      : "—";
+    automationDetailsLastRun.textContent = details.lastRunAt
+      ? formatDateTime(details.lastRunAt)
+      : "Nunca executada";
+    automationDetailsAverage.textContent =
+      details.averageDurationMs == null
+        ? "Sem dados"
+        : formatDurationMs(details.averageDurationMs);
+    automationDetailsRuns.textContent = String(details.totalRuns || 0);
+    automationDetailsTagInput.value = "";
+    renderAutomationDetailsTags(details.tags || []);
+
+    automationDetailsModal.classList.remove("is-hidden");
+    setStatus("Detalhes carregados", "success");
+  } catch (error) {
+    setStatus("Erro nos detalhes", "error");
+    alert(error?.message || String(error));
+  }
+}
+
+function closeAutomationDetails() {
+  automationDetailsModal.classList.add("is-hidden");
+  currentDetailsRecordingId = null;
+  automationDetailsTagInput.value = "";
+}
+
+function syncProfilePopover() {
+  const user = currentUser || {
+    name: "Administrador",
+    email: "admin@autofuture.local",
+    role: "admin",
+  };
+
+  profilePopoverName.textContent = user.name || "Administrador";
+  profilePopoverEmail.textContent = user.email || "—";
+  profilePopoverRole.textContent =
+    user.role === "admin" ? "Administrador" : user.role || "Usuário";
+}
+
+function closeProfilePopover() {
+  profilePopover.classList.add("is-hidden");
+  profileDockButton.setAttribute("aria-expanded", "false");
+}
+
+function renderFolderCard(folder, surface) {
+  const card = document.createElement("article");
+  const total = savedRecordings.filter(
+    (recording) => recording.folderId === folder.id
+  ).length;
+
+  card.className = "folder-card";
+  card.dataset.folderId = folder.id;
+  card.innerHTML =
+    '<button class="folder-card__open" type="button">' +
+      '<span class="folder-card__icon">' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2-2h9a1.5 1.5 0 0 1 1.5 1.5v10.5A2.5 2.5 0 0 1 19.5 20h-15A2.5 2.5 0 0 1 2 17.5V9a1.5 1.5 0 0 1 1.5-1.5z"></path></svg>' +
+      "</span>" +
+      '<span class="folder-card__copy">' +
+        "<strong>" + escapeHtml(folder.name) + "</strong>" +
+        "<small>" + total + " automaç" + (total === 1 ? "ão" : "ões") + "</small>" +
+      "</span>" +
+    "</button>" +
+    '<button class="folder-card__delete" type="button" aria-label="Excluir pasta">×</button>';
+
+  setupRecordingDropTarget(card, folder.id);
+
+  card.querySelector(".folder-card__open").addEventListener("click", () => {
+    setActiveFolder(surface, folder.id);
+  });
+
+  card.querySelector(".folder-card__delete").addEventListener("click", (event) => {
+    event.stopPropagation();
+
+    openConfirmModal({
+      eyebrow: "EXCLUIR PASTA",
+      title: 'Excluir "' + folder.name + '"?',
+      description:
+        "As automações não serão apagadas. Elas voltarão para a lista principal.",
+      note:
+        total > 0
+          ? total + " automaç" + (total === 1 ? "ão será movida" : "ões serão movidas") +
+            " para fora da pasta."
+          : "A pasta está vazia.",
+      confirmLabel: "Excluir pasta",
+      onConfirm: async () => {
+        await ipcRenderer.invoke("folder:delete", folder.id);
+
+        if (activeFolderBySurface.editor === folder.id) {
+          activeFolderBySurface.editor = null;
+        }
+
+        if (activeFolderBySurface.recordings === folder.id) {
+          activeFolderBySurface.recordings = null;
+        }
+
+        await Promise.all([refreshFolders(), refreshRecordings()]);
+        setStatus("Pasta excluída", "success");
+      },
+    });
+  });
+
+  return card;
+}
+
+function renderAutomationCard(recording, surface = "editor") {
   const card = document.createElement("article");
   card.className = "automation-card surface-card";
+  card.draggable = true;
+  card.dataset.recordingId = recording.id;
+  card.dataset.surface = surface;
 
   const scheduleTotal = automationScheduleCount(recording.id);
   const modeLabel =
@@ -652,6 +950,19 @@ function renderAutomationCard(recording) {
       ? "Otimizada"
       : speedLabel(recording.executionSpeed);
   const actions = recording.actions?.length || 0;
+  const tags = recordingTags(recording);
+
+  const tagHtml = tags.length
+    ? '<div class="automation-card__tags">' +
+      tags
+        .slice(0, 3)
+        .map((tag) => '<span class="automation-tag">' + escapeHtml(tag) + "</span>")
+        .join("") +
+      (tags.length > 3
+        ? '<span class="automation-tag automation-tag--more">+' + (tags.length - 3) + "</span>"
+        : "") +
+      "</div>"
+    : '<div class="automation-card__tags automation-card__tags--empty"><span>Sem tags</span></div>';
 
   card.innerHTML =
     '<div class="automation-card__top">' +
@@ -665,6 +976,7 @@ function renderAutomationCard(recording) {
       "<h3>" + escapeHtml(recording.name || "Automação") + "</h3>" +
       "<p>" + escapeHtml(recording.initialUrl || "") + "</p>" +
     "</div>" +
+    tagHtml +
     '<div class="automation-card__foot">' +
       "<span>" +
         (scheduleTotal
@@ -686,6 +998,7 @@ function renderAutomationCard(recording) {
     "</button>" +
     '<div class="automation-card__actions">' +
       '<button class="button compact automation-edit-button" type="button">Editar</button>' +
+      '<button class="button compact automation-details-button" type="button">Detalhes</button>' +
       '<button class="button compact automation-schedule-button" type="button">Agendar</button>' +
       '<span class="fuse-button automation-delete-fuse" data-phase="idle">' +
         '<button class="fuse-button__face fuse-button__idle" type="button"><span class="fuse-button__icon">⌫</span>Excluir</button>' +
@@ -695,9 +1008,31 @@ function renderAutomationCard(recording) {
       "</span>" +
     "</div>";
 
+  card.addEventListener("dragstart", (event) => {
+    event.dataTransfer?.setData(
+      "application/x-auto-future-recording",
+      recording.id
+    );
+    event.dataTransfer?.setData("text/plain", recording.id);
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+
+    card.classList.add("is-dragging");
+  });
+
+  card.addEventListener("dragend", () => {
+    card.classList.remove("is-dragging");
+  });
+
   card
     .querySelector(".automation-edit-button")
     .addEventListener("click", () => void openAutomationForEdit(recording.id));
+
+  card
+    .querySelector(".automation-details-button")
+    .addEventListener("click", () => void openAutomationDetails(recording.id));
 
   card
     .querySelector(".automation-schedule-button")
@@ -746,32 +1081,77 @@ function renderAutomationCard(recording) {
   return card;
 }
 
-function renderAutomationLibraries() {
-  automationLibrary.innerHTML = "";
-  recordingsLibrary.innerHTML = "";
+function renderSurfaceLibrary(surface) {
+  const isEditor = surface === "editor";
+  const library = isEditor ? automationLibrary : recordingsLibrary;
+  const folderGrid = isEditor ? editorFolderGrid : recordingsFolderGrid;
+  const context = isEditor ? editorFolderContext : recordingsFolderContext;
+  const contextName = isEditor
+    ? editorFolderContextName
+    : recordingsFolderContextName;
+  const emptyState = isEditor
+    ? automationLibraryEmpty
+    : recordingsLibraryEmpty;
 
-  automationLibraryCount.textContent = String(savedRecordings.length);
+  library.innerHTML = "";
+  folderGrid.innerHTML = "";
 
-  automationLibraryEmpty.classList.toggle(
-    "is-hidden",
-    savedRecordings.length > 0
-  );
-
-  recordingsLibraryEmpty.classList.toggle(
-    "is-hidden",
-    savedRecordings.length > 0
-  );
-
-  for (const recording of savedRecordings) {
-    automationLibrary.appendChild(renderAutomationCard(recording));
-    recordingsLibrary.appendChild(renderAutomationCard(recording));
+  for (const folder of savedFolders) {
+    folderGrid.appendChild(renderFolderCard(folder, surface));
   }
+
+  const activeFolderId = activeFolderBySurface[surface];
+  let activeFolder = savedFolders.find((folder) => folder.id === activeFolderId);
+
+  if (activeFolderId && !activeFolder) {
+    activeFolderBySurface[surface] = null;
+    activeFolder = null;
+  }
+
+  context.classList.toggle("is-hidden", !activeFolder);
+
+  if (activeFolder) {
+    contextName.textContent = activeFolder.name;
+  }
+
+  const visibleRecordings = savedRecordings.filter((recording) =>
+    activeFolder
+      ? recording.folderId === activeFolder.id
+      : !recording.folderId
+  );
+
+  for (const recording of visibleRecordings) {
+    library.appendChild(renderAutomationCard(recording, surface));
+  }
+
+  const hasAnything = savedFolders.length > 0 || savedRecordings.length > 0;
+  emptyState.classList.toggle("is-hidden", hasAnything);
+
+  if (activeFolder && visibleRecordings.length === 0) {
+    const placeholder = document.createElement("div");
+    placeholder.className = "folder-empty-state";
+    placeholder.innerHTML =
+      "<strong>Pasta vazia</strong>" +
+      "<span>Arraste uma automação até esta pasta para guardar aqui.</span>";
+    library.appendChild(placeholder);
+  }
+}
+
+function renderAutomationLibraries() {
+  automationLibraryCount.textContent = String(savedRecordings.length);
+  renderSurfaceLibrary("editor");
+  renderSurfaceLibrary("recordings");
 }
 
 async function refreshRecordings() {
   savedRecordings = await ipcRenderer.invoke("recordings:list");
   renderAutomationLibraries();
   populateScheduleAutomationSelect();
+}
+
+async function refreshFolders() {
+  savedFolders = await ipcRenderer.invoke("folders:list");
+  renderAutomationLibraries();
 }
 
 async function openAutomationForEdit(id) {
@@ -1236,16 +1616,18 @@ async function refreshRuns() {
 }
 
 async function refreshPersistentData() {
-  const [recordings, schedules, runs, notifications] = await Promise.all([
+  const [recordings, schedules, runs, notifications, folders] = await Promise.all([
     ipcRenderer.invoke("recordings:list"),
     ipcRenderer.invoke("schedules:list"),
     ipcRenderer.invoke("runs:list"),
     ipcRenderer.invoke("notifications:list"),
+    ipcRenderer.invoke("folders:list"),
   ]);
 
   savedRecordings = recordings;
   savedSchedules = schedules;
   savedNotifications = Array.isArray(notifications) ? notifications : [];
+  savedFolders = Array.isArray(folders) ? folders : [];
 
   renderAutomationLibraries();
   populateScheduleAutomationSelect();
@@ -2094,71 +2476,6 @@ ipcRenderer.on("execution:progress", (_event, progress) => {
   );
 });
 
-function sidebarFrame(now) {
-  const dt = Math.min((now - sidebarLast) / 1000, 0.05);
-  sidebarLast = now;
-
-  const k = 1 - Math.exp(-dt / 0.075);
-  let moving = false;
-
-  sideItems.forEach((item, index) => {
-    const target = item.classList.contains("active")
-      ? 1
-      : sidebarTargets[index] || 0;
-
-    const current = sidebarCurrent[index] || 0;
-    const next = current + (target - current) * k;
-    const settled = Math.abs(target - next) < 0.002;
-    const value = settled ? target : next;
-
-    sidebarCurrent[index] = value;
-    item.style.setProperty("--effect", value.toFixed(4));
-
-    if (!settled) moving = true;
-  });
-
-  sidebarRaf = moving ? requestAnimationFrame(sidebarFrame) : null;
-}
-
-function startSidebarAnimation() {
-  if (sidebarRaf) cancelAnimationFrame(sidebarRaf);
-
-  sidebarLast = performance.now();
-  sidebarRaf = requestAnimationFrame(sidebarFrame);
-}
-
-function initLineSidebar() {
-  lineSidebar.addEventListener(
-    "pointermove",
-    (event) => {
-      if (sidebarCollapsed) return;
-
-      const rect = lineSidebar.getBoundingClientRect();
-      const pointerY = event.clientY - rect.top;
-      const radius = 82;
-
-      sideItems.forEach((item, index) => {
-        const center = item.offsetTop + item.offsetHeight / 2;
-        const raw = Math.max(0, 1 - Math.abs(pointerY - center) / radius);
-        sidebarTargets[index] = raw * raw * (3 - 2 * raw);
-      });
-
-      startSidebarAnimation();
-    },
-    { passive: true }
-  );
-
-  lineSidebar.addEventListener("pointerleave", () => {
-    sideItems.forEach((item, index) => {
-      sidebarTargets[index] = item.classList.contains("active") ? 1 : 0;
-    });
-
-    startSidebarAnimation();
-  });
-
-  startSidebarAnimation();
-}
-
 function initMagicCards() {
   document.querySelectorAll(".magic-card").forEach((card) => {
     let frame = null;
@@ -2198,105 +2515,10 @@ function initRubberSegment() {
 
   rubberItems.forEach((item, index) => {
     item.addEventListener("click", () => {
-      if (suppressRubberClick || rubberDrag?.moved) return;
-
       setRubberIndex(index);
       openPage(item.dataset.page);
     });
   });
-
-  rubberTrack.addEventListener("pointerdown", (event) => {
-    const item = event.target.closest(".rubber-segment__item");
-    if (!item) return;
-
-    const index = rubberItems.indexOf(item);
-    if (index !== rubberActiveIndex) return;
-
-    const trackRect = rubberTrack.getBoundingClientRect();
-    const thumbRect = rubberThumb.getBoundingClientRect();
-
-    rubberDrag = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      offset: event.clientX - thumbRect.left,
-      trackLeft: trackRect.left,
-      minX: 0,
-      maxX: trackRect.width - thumbRect.width - 6,
-      moved: false,
-    };
-
-    rubberTrack.setPointerCapture(event.pointerId);
-    rubberTrack.dataset.held = "true";
-    rubberTrack.classList.add("dragging");
-  });
-
-  rubberTrack.addEventListener(
-    "pointermove",
-    (event) => {
-      if (!rubberDrag || event.pointerId !== rubberDrag.pointerId) return;
-
-      const delta = Math.abs(event.clientX - rubberDrag.startX);
-      if (delta > 4) rubberDrag.moved = true;
-      if (!rubberDrag.moved) return;
-
-      const x = Math.min(
-        rubberDrag.maxX,
-        Math.max(
-          rubberDrag.minX,
-          event.clientX - rubberDrag.trackLeft - rubberDrag.offset
-        )
-      );
-
-      rubberThumb.style.transform = "translate3d(" + x + "px, 0, 0)";
-    },
-    { passive: true }
-  );
-
-  function finishRubberDrag(event) {
-    if (!rubberDrag || event.pointerId !== rubberDrag.pointerId) return;
-
-    const wasMoved = rubberDrag.moved;
-
-    rubberTrack.dataset.held = "false";
-    rubberTrack.classList.remove("dragging");
-
-    if (wasMoved) {
-      const thumbRect = rubberThumb.getBoundingClientRect();
-      const center = thumbRect.left + thumbRect.width / 2;
-
-      let nearest = 0;
-      let nearestDistance = Infinity;
-
-      rubberItems.forEach((item, index) => {
-        const rect = item.getBoundingClientRect();
-        const distance = Math.abs(center - (rect.left + rect.width / 2));
-
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          nearest = index;
-        }
-      });
-
-      rubberDrag = null;
-      suppressRubberClick = true;
-
-      setRubberIndex(nearest);
-      openPage(rubberItems[nearest].dataset.page);
-
-      window.setTimeout(() => {
-        suppressRubberClick = false;
-      }, 0);
-
-      return;
-    }
-
-    rubberDrag = null;
-    measureRubber();
-  }
-
-  rubberTrack.addEventListener("pointerup", finishRubberDrag);
-  rubberTrack.addEventListener("pointercancel", finishRubberDrag);
-  window.addEventListener("resize", measureRubber, { passive: true });
 }
 
 ipcRenderer.on("recording:action", (_event, action) => addEvent(action));
@@ -2355,6 +2577,139 @@ confirmModalConfirm.addEventListener("click", async () => {
   }
 });
 
+[editorCreateFolderButton, recordingsCreateFolderButton].forEach((button) => {
+  button.addEventListener("click", openFolderCreateModal);
+});
+
+folderCreateCancel.addEventListener("click", closeFolderCreateModal);
+
+folderCreateModal.addEventListener("click", (event) => {
+  if (event.target === folderCreateModal) {
+    closeFolderCreateModal();
+  }
+});
+
+folderCreateConfirm.addEventListener("click", async () => {
+  const name = folderCreateName.value.trim();
+
+  if (!name) {
+    folderCreateName.focus();
+    return;
+  }
+
+  folderCreateConfirm.disabled = true;
+  folderCreateConfirm.textContent = "Criando...";
+
+  try {
+    await ipcRenderer.invoke("folder:create", { name });
+    closeFolderCreateModal();
+    await refreshFolders();
+    setStatus("Pasta criada", "success");
+  } catch (error) {
+    setStatus("Erro ao criar pasta", "error");
+    alert(error?.message || String(error));
+  } finally {
+    folderCreateConfirm.disabled = false;
+    folderCreateConfirm.textContent = "Criar pasta";
+  }
+});
+
+folderCreateName.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    folderCreateConfirm.click();
+  }
+});
+
+editorFolderClose.addEventListener("click", () => {
+  setActiveFolder("editor", null);
+});
+
+recordingsFolderClose.addEventListener("click", () => {
+  setActiveFolder("recordings", null);
+});
+
+setupRecordingDropTarget(editorFolderRemoveDrop, null);
+setupRecordingDropTarget(recordingsFolderRemoveDrop, null);
+
+automationDetailsClose.addEventListener("click", closeAutomationDetails);
+
+automationDetailsModal.addEventListener("click", (event) => {
+  if (event.target === automationDetailsModal) {
+    closeAutomationDetails();
+  }
+});
+
+automationDetailsTagAdd.addEventListener("click", () => {
+  if (!currentDetailsRecordingId) return;
+
+  const value = automationDetailsTagInput.value.replace(/\s+/g, " ").trim();
+  if (!value) return;
+
+  const recording = savedRecordings.find(
+    (item) => item.id === currentDetailsRecordingId
+  );
+
+  const currentTags = recordingTags(recording);
+  const exists = currentTags.some(
+    (tag) => tag.toLocaleLowerCase("pt-BR") === value.toLocaleLowerCase("pt-BR")
+  );
+
+  if (exists) {
+    automationDetailsTagInput.value = "";
+    return;
+  }
+
+  if (currentTags.length >= 8) {
+    setStatus("Limite de 8 tags atingido", "error");
+    return;
+  }
+
+  automationDetailsTagInput.value = "";
+  void updateCurrentDetailsTags([...currentTags, value]);
+});
+
+automationDetailsTagInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    automationDetailsTagAdd.click();
+  }
+});
+
+profileDockButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+
+  const opening = profilePopover.classList.contains("is-hidden");
+  notificationPanel.classList.add("is-hidden");
+  notificationBell.setAttribute("aria-expanded", "false");
+
+  if (opening) {
+    syncProfilePopover();
+  }
+
+  profilePopover.classList.toggle("is-hidden", !opening);
+  profileDockButton.setAttribute("aria-expanded", opening ? "true" : "false");
+});
+
+profilePopover.addEventListener("click", (event) => {
+  event.stopPropagation();
+});
+
+async function performLogout() {
+  await ipcRenderer.invoke("auth:logout");
+
+  closeProfilePopover();
+  currentUser = null;
+  appShell.classList.add("is-hidden");
+  loginScreen.classList.remove("is-hidden", "leaving");
+  document.body.classList.remove("logged-in");
+  loginPassword.value = "";
+}
+
+profileLogoutButton.addEventListener("click", () => {
+  void performLogout();
+});
+
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -2362,10 +2717,13 @@ loginForm.addEventListener("submit", async (event) => {
   loginButton.textContent = "Entrando...";
 
   try {
-    await ipcRenderer.invoke("auth:login", {
+    const loginResult = await ipcRenderer.invoke("auth:login", {
       email: loginEmail.value,
       password: loginPassword.value,
     });
+
+    currentUser = loginResult?.user || null;
+    syncProfilePopover();
 
     loginScreen.classList.add("leaving");
 
@@ -2374,7 +2732,6 @@ loginForm.addEventListener("submit", async (event) => {
       appShell.classList.remove("is-hidden");
       document.body.classList.add("logged-in");
 
-      setSidebarCollapsed(false);
       openPage("home", { collapse: false });
       requestAnimationFrame(measureRubber);
       void ensureBrowserProfileOnAccess();
@@ -2386,23 +2743,6 @@ loginForm.addEventListener("submit", async (event) => {
       loginButton.textContent = "Entrar";
     }, 130);
   }
-});
-
-sidebarToggle.addEventListener("click", () => {
-  setSidebarCollapsed(!sidebarCollapsed);
-});
-
-logoutButton.addEventListener("click", async () => {
-  await ipcRenderer.invoke("auth:logout");
-
-  appShell.classList.add("is-hidden");
-  loginScreen.classList.remove("is-hidden", "leaving");
-  document.body.classList.remove("logged-in");
-  loginPassword.value = "";
-});
-
-document.querySelectorAll(".line-sidebar__label[data-page]").forEach((button) => {
-  button.addEventListener("click", () => openPage(button.dataset.page));
 });
 
 document.querySelectorAll("[data-open-page]").forEach((button) => {
@@ -2561,6 +2901,21 @@ browserSetupModal.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
 
+  if (!automationDetailsModal.classList.contains("is-hidden")) {
+    closeAutomationDetails();
+    return;
+  }
+
+  if (!folderCreateModal.classList.contains("is-hidden")) {
+    closeFolderCreateModal();
+    return;
+  }
+
+  if (!profilePopover.classList.contains("is-hidden")) {
+    closeProfilePopover();
+    return;
+  }
+
   if (!optimizationModal.classList.contains("is-hidden")) {
     closeOptimizationModal();
     return;
@@ -2587,6 +2942,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 stopButton.addEventListener("click", async () => {
+  stopButton.disabled = true;
   showFinalizeLoader();
 
   try {
@@ -2606,6 +2962,8 @@ stopButton.addEventListener("click", async () => {
     selectedActionId = null;
     openPage("editor");
   } catch (error) {
+    recordButton.disabled = false;
+    stopButton.disabled = true;
     setStatus("Erro", "error");
     await finishFinalizeLoader("error", "Erro ao finalizar", 950);
     alert(error?.message || String(error));
@@ -2888,6 +3246,10 @@ ipcRenderer.on("recordings:changed", () => {
   void refreshRecordings();
 });
 
+ipcRenderer.on("folders:changed", () => {
+  void refreshFolders();
+});
+
 ipcRenderer.on("schedules:changed", () => {
   void refreshSchedules();
 });
@@ -2971,6 +3333,7 @@ recordingVideo.addEventListener("ended", updateVideoUI);
 
 notificationBell.addEventListener("click", (event) => {
   event.stopPropagation();
+  closeProfilePopover();
   const willOpen = notificationPanel.classList.contains("is-hidden");
   notificationPanel.classList.toggle("is-hidden", !willOpen);
   notificationBell.setAttribute("aria-expanded", willOpen ? "true" : "false");
@@ -2988,6 +3351,10 @@ document.addEventListener("click", () => {
   if (!notificationPanel.classList.contains("is-hidden")) {
     notificationPanel.classList.add("is-hidden");
     notificationBell.setAttribute("aria-expanded", "false");
+  }
+
+  if (!profilePopover.classList.contains("is-hidden")) {
+    closeProfilePopover();
   }
 });
 
@@ -3062,6 +3429,5 @@ initSpeedGauge(executionSpeedGauge, (speed) => {
   setCurrentExecutionSpeed(speed, "execution");
 });
 
-initLineSidebar();
 initMagicCards();
 initRubberSegment();

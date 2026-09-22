@@ -12,6 +12,7 @@ import {
 } from "./automation/browser-profile";
 import {
   AutomationAction,
+  AutomationFolder,
   AutomationNotificationRecord,
   AutomationRecording,
   AutomationRunRecord,
@@ -50,6 +51,10 @@ function notificationsPath(): string {
   return path.join(stateDir(), "notifications.json");
 }
 
+function foldersPath(): string {
+  return path.join(stateDir(), "folders.json");
+}
+
 function browserProfileDir(): string {
   return path.join(app.getPath("userData"), "browser-profile");
 }
@@ -67,6 +72,28 @@ function normalizeOptimization(value: unknown): boolean {
 
 function normalizeNotifications(value: unknown): boolean {
   return value === true;
+}
+
+function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const tags: string[] = [];
+
+  for (const entry of value) {
+    const tag = String(entry ?? "").replace(/\s+/g, " ").trim();
+    if (!tag) continue;
+
+    const key = tag.toLocaleLowerCase("pt-BR");
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    tags.push(tag.slice(0, 28));
+
+    if (tags.length >= 8) break;
+  }
+
+  return tags;
 }
 
 function localDateKey(date: Date): string {
@@ -110,6 +137,7 @@ async function persistRecording(recording: AutomationRecording): Promise<string>
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
   recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
   recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
+  recording.tags = normalizeTags(recording.tags);
 
   const filePath = path.join(dir, recording.id + ".json");
   await fs.writeFile(filePath, JSON.stringify(recording, null, 2), "utf8");
@@ -123,6 +151,7 @@ async function loadRecordingById(id: string): Promise<AutomationRecording> {
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
   recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
   recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
+  recording.tags = normalizeTags(recording.tags);
   return recording;
 }
 
@@ -141,6 +170,7 @@ async function listRecordings(): Promise<AutomationRecording[]> {
       recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
       recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
       recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
+      recording.tags = normalizeTags(recording.tags);
       recordings.push(recording);
     } catch {
       // Keep loading the rest of the persistent library if one file is damaged.
@@ -209,6 +239,25 @@ async function writeNotifications(
   await fs.writeFile(
     notificationsPath(),
     JSON.stringify(notifications.slice(0, 200), null, 2),
+    "utf8"
+  );
+}
+
+async function readFolders(): Promise<AutomationFolder[]> {
+  try {
+    const raw = await fs.readFile(foldersPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as AutomationFolder[] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeFolders(folders: AutomationFolder[]): Promise<void> {
+  await fs.mkdir(stateDir(), { recursive: true });
+  await fs.writeFile(
+    foldersPath(),
+    JSON.stringify(folders, null, 2),
     "utf8"
   );
 }
@@ -501,6 +550,155 @@ app.whenReady().then(async () => {
     }
 
     return { ok: true };
+  });
+
+  ipcMain.handle("folders:list", async () => {
+    return readFolders();
+  });
+
+  ipcMain.handle("folder:create", async (_event, payload: { name?: string }) => {
+    const name = String(payload?.name || "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!name) {
+      throw new Error("Digite um nome para a pasta.");
+    }
+
+    const folders = await readFolders();
+    const key = name.toLocaleLowerCase("pt-BR");
+
+    if (folders.some((folder) => folder.name.toLocaleLowerCase("pt-BR") === key)) {
+      throw new Error("Ja existe uma pasta com esse nome.");
+    }
+
+    const now = new Date().toISOString();
+    const folder: AutomationFolder = {
+      id: randomUUID(),
+      name: name.slice(0, 48),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    folders.unshift(folder);
+    await writeFolders(folders);
+    mainWindow?.webContents.send("folders:changed");
+
+    return { ok: true, folder };
+  });
+
+  ipcMain.handle("folder:delete", async (_event, id: string) => {
+    const folders = (await readFolders()).filter((folder) => folder.id !== id);
+    await writeFolders(folders);
+
+    const recordings = await listRecordings();
+
+    for (const recording of recordings) {
+      if (recording.folderId !== id) continue;
+      recording.folderId = undefined;
+      await persistRecording(recording);
+
+      if (lastRecording?.id === recording.id) {
+        lastRecording = recording;
+      }
+    }
+
+    mainWindow?.webContents.send("folders:changed");
+    mainWindow?.webContents.send("recordings:changed");
+
+    return { ok: true };
+  });
+
+  ipcMain.handle(
+    "recording:set-folder",
+    async (_event, payload: { id: string; folderId?: string | null }) => {
+      const recording = await loadRecordingById(payload.id);
+      const folderId = payload.folderId || undefined;
+
+      if (folderId) {
+        const folders = await readFolders();
+        if (!folders.some((folder) => folder.id === folderId)) {
+          throw new Error("Essa pasta nao existe mais.");
+        }
+      }
+
+      recording.folderId = folderId;
+      await persistRecording(recording);
+
+      if (lastRecording?.id === recording.id) {
+        lastRecording = recording;
+      }
+
+      mainWindow?.webContents.send("recordings:changed");
+      return { ok: true, recording: withVideoUrl(recording) };
+    }
+  );
+
+  ipcMain.handle(
+    "recording:set-tags",
+    async (_event, payload: { id: string; tags?: string[] }) => {
+      const recording = await loadRecordingById(payload.id);
+      recording.tags = normalizeTags(payload.tags);
+      await persistRecording(recording);
+
+      if (lastRecording?.id === recording.id) {
+        lastRecording = recording;
+      }
+
+      mainWindow?.webContents.send("recordings:changed");
+      return { ok: true, recording: withVideoUrl(recording) };
+    }
+  );
+
+  ipcMain.handle("recording:details", async (_event, id: string) => {
+    const recording = await loadRecordingById(id);
+    const runs = (await readRuns()).filter((run) => run.automationId === id);
+    const completed = runs.filter(
+      (run) => run.finishedAt && (run.status === "success" || run.status === "error")
+    );
+
+    const durations = completed
+      .map((run) => {
+        const start = Date.parse(run.startedAt);
+        const end = Date.parse(run.finishedAt || "");
+        return Number.isFinite(start) && Number.isFinite(end)
+          ? Math.max(0, end - start)
+          : null;
+      })
+      .filter((value): value is number => value !== null);
+
+    const averageDurationMs = durations.length
+      ? Math.round(
+          durations.reduce((total, value) => total + value, 0) / durations.length
+        )
+      : null;
+
+    let baseDomain = "—";
+
+    try {
+      baseDomain = new URL(recording.initialUrl).hostname || "—";
+    } catch {
+      baseDomain = "—";
+    }
+
+    const lastRun = runs
+      .slice()
+      .sort(
+        (a, b) =>
+          (Date.parse(b.startedAt) || 0) - (Date.parse(a.startedAt) || 0)
+      )[0];
+
+    return {
+      id: recording.id,
+      name: recording.name,
+      createdAt: recording.createdAt,
+      lastRunAt: lastRun?.finishedAt || lastRun?.startedAt || null,
+      averageDurationMs,
+      baseDomain,
+      totalRuns: runs.length,
+      tags: normalizeTags(recording.tags),
+      folderId: recording.folderId || null,
+    };
   });
 
   ipcMain.handle("browser:profile-status", async () => {

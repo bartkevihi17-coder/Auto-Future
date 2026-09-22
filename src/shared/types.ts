@@ -43,6 +43,8 @@ export interface AutomationRecording {
   executionSpeed?: ExecutionSpeed;
   optimizationEnabled?: boolean;
   notificationsEnabled?: boolean;
+  folderId?: string;
+  tags?: string[];
 }
 
 export interface RunOptions {
@@ -83,6 +85,13 @@ export interface AutomationRunRecord {
   finishedAt?: string;
   status: AutomationRunStatus;
   error?: string;
+}
+
+export interface AutomationFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AutomationNotificationRecord {
