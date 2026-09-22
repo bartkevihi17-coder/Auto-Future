@@ -12,7 +12,6 @@ const lineSidebar = document.querySelector("#line-sidebar");
 const brandHome = document.querySelector("#brand-home");
 const logoutButton = document.querySelector("#logout-button");
 const pageTitle = document.querySelector("#page-title");
-const viewLoading = document.querySelector("#view-loading");
 
 const recordButton = document.querySelector("#record-button");
 const stopButton = document.querySelector("#stop-button");
@@ -33,6 +32,22 @@ const videoMissing = document.querySelector("#video-missing");
 const timelineActions = document.querySelector("#timeline-actions");
 const timelineRuler = document.querySelector("#timeline-ruler");
 const timelineDuration = document.querySelector("#timeline-duration");
+const timelineScroll = document.querySelector("#timeline-scroll");
+const timelineCanvas = document.querySelector("#timeline-canvas");
+const timelinePlayhead = document.querySelector("#timeline-playhead");
+const timelinePlay = document.querySelector("#timeline-play");
+const timelineBack = document.querySelector("#timeline-back");
+const timelineForward = document.querySelector("#timeline-forward");
+const timelineZoomIn = document.querySelector("#timeline-zoom-in");
+const timelineZoomOut = document.querySelector("#timeline-zoom-out");
+const timelineZoomLabel = document.querySelector("#timeline-zoom-label");
+
+const playerPlay = document.querySelector("#player-play");
+const playerMute = document.querySelector("#player-mute");
+const playerCurrent = document.querySelector("#player-current");
+const playerTotal = document.querySelector("#player-total");
+const playerProgress = document.querySelector("#player-progress");
+
 const inspectorType = document.querySelector("#inspector-type");
 const inspectorDelay = document.querySelector("#inspector-delay");
 const inspectorSelector = document.querySelector("#inspector-selector");
@@ -50,15 +65,17 @@ let eventCount = 0;
 let sidebarCollapsed = false;
 let currentRecording = null;
 let selectedActionId = null;
-let activePage = "home";
 let rubberActiveIndex = 0;
 let rubberDrag = null;
 let suppressRubberClick = false;
+
 let sidebarRaf = null;
 let sidebarLast = performance.now();
 const sidebarTargets = sideItems.map((_, index) => (index === 0 ? 1 : 0));
 const sidebarCurrent = [...sidebarTargets];
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let timelineZoom = 1;
+let timelineActionDurationMs = 1000;
 
 const pageNames = {
   home: "Início",
@@ -80,9 +97,7 @@ function setSidebarCollapsed(collapsed) {
   sidebarToggle.querySelector("span").textContent = collapsed ? "›" : "‹";
   sidebarToggle.setAttribute("aria-label", collapsed ? "Expandir menu" : "Recolher menu");
 
-  if (!collapsed) {
-    startSidebarAnimation();
-  }
+  if (!collapsed) startSidebarAnimation();
 }
 
 function collapseSidebarForNavigation() {
@@ -96,6 +111,7 @@ function pageToRubberIndex(name) {
 
 function measureRubber() {
   if (!rubberTrack || !rubberThumb || !rubberItems.length) return;
+
   const item = rubberItems[rubberActiveIndex];
   if (!item) return;
 
@@ -105,7 +121,8 @@ function measureRubber() {
 
   rubberThumb.style.width = itemRect.width + "px";
   rubberThumb.style.height = itemRect.height + "px";
-  rubberThumb.style.transform = "translate3d(" + (itemRect.left - trackRect.left - inset) + "px, 0, 0)";
+  rubberThumb.style.transform =
+    "translate3d(" + (itemRect.left - trackRect.left - inset) + "px, 0, 0)";
 }
 
 function setRubberIndex(index, animate = true) {
@@ -129,8 +146,6 @@ function setRubberIndex(index, animate = true) {
 }
 
 function updateNavigationState(name) {
-  activePage = name;
-
   sideItems.forEach((item, index) => {
     const active = item.dataset.page === name;
     item.classList.toggle("active", active);
@@ -184,18 +199,9 @@ function resetEventList() {
   events.innerHTML = '<p class="empty">Aguardando suas ações no navegador...</p>';
 }
 
-function enableGlowPointer() {
-  document.querySelectorAll(".glow-button").forEach((button) => {
-    button.addEventListener("pointermove", (event) => {
-      const rect = button.getBoundingClientRect();
-      button.style.setProperty("--mx", event.clientX - rect.left + "px");
-      button.style.setProperty("--my", event.clientY - rect.top + "px");
-    }, { passive: true });
-  });
-}
-
 function cumulativeTimes(actions) {
   let total = 0;
+
   return actions.map((action) => {
     total += Math.max(0, Number(action.delayMs) || 0);
     return total;
@@ -206,6 +212,14 @@ function formatSeconds(ms) {
   return (ms / 1000).toFixed(1) + "s";
 }
 
+function formatClock(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return minutes + ":" + String(secs).padStart(2, "0");
+}
+
 function actionLabel(action) {
   if (action.type === "click") return "Clique";
   if (action.type === "input") return "Digitação";
@@ -213,21 +227,64 @@ function actionLabel(action) {
   return action.type;
 }
 
+function updateVideoUI() {
+  const current = Number(recordingVideo.currentTime) || 0;
+  const total = Number(recordingVideo.duration) || 0;
+  const fraction = total > 0 ? Math.min(1, Math.max(0, current / total)) : 0;
+
+  playerCurrent.textContent = formatClock(current);
+  playerTotal.textContent = formatClock(total);
+  playerProgress.value = String(Math.round(fraction * 1000));
+  playerProgress.style.setProperty("--progress", fraction * 100 + "%");
+
+  playerPlay.textContent = recordingVideo.paused ? "▶" : "❚❚";
+  timelinePlay.textContent = recordingVideo.paused ? "▶" : "❚❚";
+
+  timelinePlayhead.style.left = fraction * 100 + "%";
+}
+
+function togglePlayback() {
+  if (!recordingVideo.src) return;
+
+  if (recordingVideo.paused) {
+    void recordingVideo.play();
+  } else {
+    recordingVideo.pause();
+  }
+}
+
+function seekRelative(deltaSeconds) {
+  const total = Number(recordingVideo.duration) || 0;
+  if (!total) return;
+
+  recordingVideo.currentTime = Math.max(
+    0,
+    Math.min(total, (Number(recordingVideo.currentTime) || 0) + deltaSeconds)
+  );
+}
+
+function applyTimelineZoom() {
+  const widthPercent = Math.round(timelineZoom * 100);
+  timelineCanvas.style.width = widthPercent + "%";
+  timelineZoomLabel.textContent = widthPercent + "%";
+}
+
 function renderTimeline() {
   if (!currentRecording) return;
 
   const actions = currentRecording.actions || [];
   const times = cumulativeTimes(actions);
-  const duration = Math.max(times[times.length - 1] || 0, 1000);
 
-  timelineDuration.textContent = formatSeconds(duration);
+  timelineActionDurationMs = Math.max(times[times.length - 1] || 0, 1000);
+  timelineDuration.textContent = formatSeconds(timelineActionDurationMs);
+
   timelineActions.innerHTML = "";
   timelineRuler.innerHTML = "";
 
-  for (let i = 0; i <= 5; i += 1) {
+  for (let i = 0; i <= 8; i += 1) {
     const tick = document.createElement("span");
-    tick.style.left = (i * 20) + "%";
-    tick.textContent = formatSeconds((duration * i) / 5);
+    tick.style.left = (i * 12.5) + "%";
+    tick.textContent = formatSeconds((timelineActionDurationMs * i) / 8);
     timelineRuler.appendChild(tick);
   }
 
@@ -238,22 +295,28 @@ function renderTimeline() {
     button.dataset.actionId = action.id;
     button.classList.toggle("selected", action.id === selectedActionId);
 
-    const left = Math.min(94, Math.max(0, (times[index] / duration) * 100));
+    const left = Math.min(96, Math.max(0, (times[index] / timelineActionDurationMs) * 100));
     button.style.left = left + "%";
 
     const icon = action.type === "click" ? "●" : action.type === "input" ? "⌨" : "↗";
-    button.innerHTML = '<strong>' + icon + " " + actionLabel(action) + '</strong><small>' + formatSeconds(times[index]) + "</small>";
+    button.innerHTML =
+      "<strong>" + icon + " " + actionLabel(action) + "</strong>" +
+      "<small>" + formatSeconds(times[index]) + "</small>";
 
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
       selectAction(action.id);
 
-      if (recordingVideo.duration && Number.isFinite(recordingVideo.duration)) {
-        recordingVideo.currentTime = Math.min(recordingVideo.duration, times[index] / 1000);
+      const videoTotal = Number(recordingVideo.duration) || 0;
+      if (videoTotal) {
+        recordingVideo.currentTime = Math.min(videoTotal, times[index] / 1000);
       }
     });
 
     timelineActions.appendChild(button);
   });
+
+  applyTimelineZoom();
 }
 
 function selectAction(actionId) {
@@ -265,20 +328,24 @@ function selectAction(actionId) {
     inspectorDelay.value = "";
     inspectorSelector.value = "";
     inspectorValue.value = "";
+
     inspectorDelay.disabled = true;
     inspectorSelector.disabled = true;
     inspectorValue.disabled = true;
     deleteActionButton.disabled = true;
+
     renderTimeline();
     return;
   }
 
   inspectorType.textContent = actionLabel(action);
+
   inspectorDelay.disabled = false;
   inspectorDelay.value = String(action.delayMs ?? 0);
 
   inspectorSelector.disabled = false;
-  inspectorSelector.value = action.type === "navigate" ? action.url || "" : action.selector || "";
+  inspectorSelector.value =
+    action.type === "navigate" ? action.url || "" : action.selector || "";
 
   inspectorValue.disabled = action.type !== "input" || action.isSecret;
   inspectorValue.value = action.isSecret ? "" : action.value || "";
@@ -311,12 +378,20 @@ function updateSelectedAction() {
 function loadEditor(recording) {
   currentRecording = recording;
   selectedActionId = recording.actions?.[0]?.id || null;
+  timelineZoom = 1;
 
   editorEmpty.classList.add("is-hidden");
   editorWorkspace.classList.remove("is-hidden");
   editorTitle.textContent = recording.name || "Gravação";
+
   saveEditorButton.disabled = false;
   testEditorButton.disabled = false;
+
+  playerProgress.value = "0";
+  playerProgress.style.setProperty("--progress", "0%");
+  playerCurrent.textContent = "0:00";
+  playerTotal.textContent = "0:00";
+  timelinePlayhead.style.left = "0%";
 
   if (recording.videoUrl) {
     videoMissing.classList.add("is-hidden");
@@ -324,28 +399,38 @@ function loadEditor(recording) {
     recordingVideo.src = recording.videoUrl;
     recordingVideo.load();
   } else {
+    recordingVideo.pause();
     recordingVideo.removeAttribute("src");
+    recordingVideo.load();
     recordingVideo.classList.add("is-hidden");
     videoMissing.classList.remove("is-hidden");
   }
 
   selectAction(selectedActionId);
+  renderTimeline();
+  updateVideoUI();
 }
 
 function sidebarFrame(now) {
   const dt = Math.min((now - sidebarLast) / 1000, 0.05);
   sidebarLast = now;
-  const k = 1 - Math.exp(-dt / 0.085);
+
+  const k = 1 - Math.exp(-dt / 0.075);
   let moving = false;
 
   sideItems.forEach((item, index) => {
-    const target = item.classList.contains("active") ? 1 : sidebarTargets[index] || 0;
+    const target = item.classList.contains("active")
+      ? 1
+      : sidebarTargets[index] || 0;
+
     const current = sidebarCurrent[index] || 0;
     const next = current + (target - current) * k;
     const settled = Math.abs(target - next) < 0.002;
     const value = settled ? target : next;
+
     sidebarCurrent[index] = value;
     item.style.setProperty("--effect", value.toFixed(4));
+
     if (!settled) moving = true;
   });
 
@@ -354,109 +439,74 @@ function sidebarFrame(now) {
 
 function startSidebarAnimation() {
   if (sidebarRaf) cancelAnimationFrame(sidebarRaf);
+
   sidebarLast = performance.now();
   sidebarRaf = requestAnimationFrame(sidebarFrame);
 }
 
 function initLineSidebar() {
-  lineSidebar.addEventListener("pointermove", (event) => {
-    if (sidebarCollapsed) return;
-    const rect = lineSidebar.getBoundingClientRect();
-    const pointerY = event.clientY - rect.top;
-    const radius = 92;
+  lineSidebar.addEventListener(
+    "pointermove",
+    (event) => {
+      if (sidebarCollapsed) return;
 
-    sideItems.forEach((item, index) => {
-      const center = item.offsetTop + item.offsetHeight / 2;
-      const raw = Math.max(0, 1 - Math.abs(pointerY - center) / radius);
-      sidebarTargets[index] = raw * raw * (3 - 2 * raw);
-    });
+      const rect = lineSidebar.getBoundingClientRect();
+      const pointerY = event.clientY - rect.top;
+      const radius = 82;
 
-    startSidebarAnimation();
-  }, { passive: true });
+      sideItems.forEach((item, index) => {
+        const center = item.offsetTop + item.offsetHeight / 2;
+        const raw = Math.max(0, 1 - Math.abs(pointerY - center) / radius);
+        sidebarTargets[index] = raw * raw * (3 - 2 * raw);
+      });
+
+      startSidebarAnimation();
+    },
+    { passive: true }
+  );
 
   lineSidebar.addEventListener("pointerleave", () => {
     sideItems.forEach((item, index) => {
       sidebarTargets[index] = item.classList.contains("active") ? 1 : 0;
     });
+
     startSidebarAnimation();
   });
 
   startSidebarAnimation();
 }
 
-function spawnCardStars(card) {
-  if (reduceMotion || card.dataset.starsActive === "true") return;
-
-  card.dataset.starsActive = "true";
-  const count = 5;
-
-  for (let i = 0; i < count; i += 1) {
-    const star = document.createElement("span");
-    star.className = "magic-particle";
-    star.style.left = 12 + Math.random() * 76 + "%";
-    star.style.top = 10 + Math.random() * 78 + "%";
-    star.style.animationDelay = i * 50 + "ms";
-    card.appendChild(star);
-    window.setTimeout(() => star.remove(), 780);
-  }
-
-  window.setTimeout(() => {
-    card.dataset.starsActive = "false";
-  }, 820);
-}
-
-function addCardRipple(card, event) {
-  if (reduceMotion) return;
-
-  const rect = card.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-  const maxDistance = Math.max(
-    Math.hypot(x, y),
-    Math.hypot(x - rect.width, y),
-    Math.hypot(x, y - rect.height),
-    Math.hypot(x - rect.width, y - rect.height)
-  );
-
-  const ripple = document.createElement("span");
-  ripple.className = "magic-ripple";
-  ripple.style.width = maxDistance * 2 + "px";
-  ripple.style.height = maxDistance * 2 + "px";
-  ripple.style.left = x - maxDistance + "px";
-  ripple.style.top = y - maxDistance + "px";
-  card.appendChild(ripple);
-  ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
-}
-
 function initMagicCards() {
   document.querySelectorAll(".magic-card").forEach((card) => {
-    let moveRaf = null;
+    let frame = null;
     let pendingX = 50;
     let pendingY = 50;
 
     card.addEventListener("pointerenter", () => {
       card.style.setProperty("--glow-intensity", "1");
-      spawnCardStars(card);
     });
 
-    card.addEventListener("pointermove", (event) => {
-      const rect = card.getBoundingClientRect();
-      pendingX = ((event.clientX - rect.left) / rect.width) * 100;
-      pendingY = ((event.clientY - rect.top) / rect.height) * 100;
+    card.addEventListener(
+      "pointermove",
+      (event) => {
+        const rect = card.getBoundingClientRect();
+        pendingX = ((event.clientX - rect.left) / rect.width) * 100;
+        pendingY = ((event.clientY - rect.top) / rect.height) * 100;
 
-      if (moveRaf) return;
-      moveRaf = requestAnimationFrame(() => {
-        card.style.setProperty("--glow-x", pendingX + "%");
-        card.style.setProperty("--glow-y", pendingY + "%");
-        moveRaf = null;
-      });
-    }, { passive: true });
+        if (frame) return;
+
+        frame = requestAnimationFrame(() => {
+          card.style.setProperty("--glow-x", pendingX + "%");
+          card.style.setProperty("--glow-y", pendingY + "%");
+          frame = null;
+        });
+      },
+      { passive: true }
+    );
 
     card.addEventListener("pointerleave", () => {
       card.style.setProperty("--glow-intensity", "0");
     });
-
-    card.addEventListener("click", (event) => addCardRipple(card, event));
   });
 }
 
@@ -466,6 +516,7 @@ function initRubberSegment() {
   rubberItems.forEach((item, index) => {
     item.addEventListener("click", () => {
       if (suppressRubberClick || rubberDrag?.moved) return;
+
       setRubberIndex(index);
       openPage(item.dataset.page);
     });
@@ -496,25 +547,33 @@ function initRubberSegment() {
     rubberTrack.classList.add("dragging");
   });
 
-  rubberTrack.addEventListener("pointermove", (event) => {
-    if (!rubberDrag || event.pointerId !== rubberDrag.pointerId) return;
+  rubberTrack.addEventListener(
+    "pointermove",
+    (event) => {
+      if (!rubberDrag || event.pointerId !== rubberDrag.pointerId) return;
 
-    const delta = Math.abs(event.clientX - rubberDrag.startX);
-    if (delta > 4) rubberDrag.moved = true;
-    if (!rubberDrag.moved) return;
+      const delta = Math.abs(event.clientX - rubberDrag.startX);
+      if (delta > 4) rubberDrag.moved = true;
+      if (!rubberDrag.moved) return;
 
-    const x = Math.min(
-      rubberDrag.maxX,
-      Math.max(rubberDrag.minX, event.clientX - rubberDrag.trackLeft - rubberDrag.offset)
-    );
+      const x = Math.min(
+        rubberDrag.maxX,
+        Math.max(
+          rubberDrag.minX,
+          event.clientX - rubberDrag.trackLeft - rubberDrag.offset
+        )
+      );
 
-    rubberThumb.style.transform = "translate3d(" + x + "px, 0, 0)";
-  }, { passive: true });
+      rubberThumb.style.transform = "translate3d(" + x + "px, 0, 0)";
+    },
+    { passive: true }
+  );
 
   function finishRubberDrag(event) {
     if (!rubberDrag || event.pointerId !== rubberDrag.pointerId) return;
 
     const wasMoved = rubberDrag.moved;
+
     rubberTrack.dataset.held = "false";
     rubberTrack.classList.remove("dragging");
 
@@ -528,6 +587,7 @@ function initRubberSegment() {
       rubberItems.forEach((item, index) => {
         const rect = item.getBoundingClientRect();
         const distance = Math.abs(center - (rect.left + rect.width / 2));
+
         if (distance < nearestDistance) {
           nearestDistance = distance;
           nearest = index;
@@ -536,9 +596,14 @@ function initRubberSegment() {
 
       rubberDrag = null;
       suppressRubberClick = true;
+
       setRubberIndex(nearest);
       openPage(rubberItems[nearest].dataset.page);
-      window.setTimeout(() => { suppressRubberClick = false; }, 0);
+
+      window.setTimeout(() => {
+        suppressRubberClick = false;
+      }, 0);
+
       return;
     }
 
@@ -571,23 +636,30 @@ loginForm.addEventListener("submit", async (event) => {
       loginScreen.classList.add("is-hidden");
       appShell.classList.remove("is-hidden");
       document.body.classList.add("logged-in");
+
       setSidebarCollapsed(false);
       openPage("home", { collapse: false });
       requestAnimationFrame(measureRubber);
-    }, 120);
+    }, 110);
   } finally {
     window.setTimeout(() => {
       loginButton.disabled = false;
       loginButton.textContent = "Entrar";
-    }, 140);
+    }, 130);
   }
 });
 
-sidebarToggle.addEventListener("click", () => setSidebarCollapsed(!sidebarCollapsed));
-brandHome.addEventListener("click", () => openPage("home"));
+sidebarToggle.addEventListener("click", () => {
+  setSidebarCollapsed(!sidebarCollapsed);
+});
+
+brandHome.addEventListener("click", () => {
+  openPage("home");
+});
 
 logoutButton.addEventListener("click", async () => {
   await ipcRenderer.invoke("auth:logout");
+
   appShell.classList.add("is-hidden");
   loginScreen.classList.remove("is-hidden", "leaving");
   document.body.classList.remove("logged-in");
@@ -624,6 +696,7 @@ recordButton.addEventListener("click", async () => {
 stopButton.addEventListener("click", async () => {
   try {
     setStatus("Salvando", "working");
+
     const result = await ipcRenderer.invoke("recording:stop");
 
     recordButton.disabled = false;
@@ -631,6 +704,7 @@ stopButton.addEventListener("click", async () => {
     runButton.disabled = false;
 
     setStatus("Salva · " + result.recording.actions.length + " ações", "success");
+
     loadEditor(result.recording);
     openPage("editor");
   } catch (error) {
@@ -664,7 +738,10 @@ runButton.addEventListener("click", async () => {
 deleteActionButton.addEventListener("click", () => {
   if (!currentRecording || !selectedActionId) return;
 
-  currentRecording.actions = currentRecording.actions.filter((action) => action.id !== selectedActionId);
+  currentRecording.actions = currentRecording.actions.filter(
+    (action) => action.id !== selectedActionId
+  );
+
   selectedActionId = currentRecording.actions[0]?.id || null;
   selectAction(selectedActionId);
 });
@@ -687,7 +764,7 @@ saveEditorButton.addEventListener("click", async () => {
     alert(error?.message || String(error));
   } finally {
     saveEditorButton.disabled = false;
-    saveEditorButton.textContent = "Salvar alterações";
+    saveEditorButton.textContent = "Salvar";
   }
 });
 
@@ -704,17 +781,65 @@ testEditorButton.addEventListener("click", async () => {
     setStatus("Testando edição", "working");
 
     await ipcRenderer.invoke("recording:run-last", { headless: false });
+
     setStatus("Teste concluído", "success");
   } catch (error) {
     setStatus("Teste falhou", "error");
     alert(error?.message || String(error));
   } finally {
     testEditorButton.disabled = false;
-    testEditorButton.textContent = "▶ Testar automação";
+    testEditorButton.textContent = "▶ Testar";
   }
 });
 
-enableGlowPointer();
+playerPlay.addEventListener("click", togglePlayback);
+timelinePlay.addEventListener("click", togglePlayback);
+
+timelineBack.addEventListener("click", () => seekRelative(-1));
+timelineForward.addEventListener("click", () => seekRelative(1));
+
+playerMute.addEventListener("click", () => {
+  recordingVideo.muted = !recordingVideo.muted;
+  playerMute.textContent = recordingVideo.muted ? "🔈" : "🔊";
+});
+
+playerProgress.addEventListener("input", () => {
+  const total = Number(recordingVideo.duration) || 0;
+  if (!total) return;
+
+  const fraction = Number(playerProgress.value) / 1000;
+  recordingVideo.currentTime = total * fraction;
+  updateVideoUI();
+});
+
+timelineZoomIn.addEventListener("click", () => {
+  timelineZoom = Math.min(3, Math.round((timelineZoom + 0.25) * 100) / 100);
+  applyTimelineZoom();
+});
+
+timelineZoomOut.addEventListener("click", () => {
+  timelineZoom = Math.max(1, Math.round((timelineZoom - 0.25) * 100) / 100);
+  applyTimelineZoom();
+});
+
+timelineCanvas.addEventListener("click", (event) => {
+  if (event.target.closest(".timeline-action")) return;
+
+  const rect = timelineCanvas.getBoundingClientRect();
+  const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const total = Number(recordingVideo.duration) || 0;
+
+  if (total) {
+    recordingVideo.currentTime = total * fraction;
+  }
+});
+
+recordingVideo.addEventListener("loadedmetadata", updateVideoUI);
+recordingVideo.addEventListener("timeupdate", updateVideoUI);
+recordingVideo.addEventListener("play", updateVideoUI);
+recordingVideo.addEventListener("pause", updateVideoUI);
+recordingVideo.addEventListener("ended", updateVideoUI);
+
 initLineSidebar();
 initMagicCards();
 initRubberSegment();
