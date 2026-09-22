@@ -6,16 +6,14 @@
     <title>Auto Future</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-
   <body>
     <div class="background-image" aria-hidden="true"></div>
     <div class="background-tint" aria-hidden="true"></div>
     <div class="flow-orb flow-orb-a" aria-hidden="true"></div>
     <div class="flow-orb flow-orb-b" aria-hidden="true"></div>
-    <div class="grain" aria-hidden="true"></div>
 
     <section id="login-screen" class="login-screen">
-      <form id="login-form" class="glass login-card glow-panel">
+      <form id="login-form" class="login-card liquid-glass">
         <div class="login-brand">
           <div class="brand-mark">AF</div>
           <div>
@@ -25,83 +23,65 @@
         </div>
 
         <div class="login-copy">
-          <p class="eyebrow">ACESSO RESTRITO</p>
+          <p class="eyebrow">ACESSO</p>
           <h1>Bem-vindo.</h1>
-          <p>Entre com sua conta para acessar suas automacoes.</p>
+          <p>Entre para acessar suas automações.</p>
         </div>
 
         <label class="field">
           <span>E-mail</span>
-          <input id="login-email" type="email" placeholder="seu@email.com" autocomplete="username" required />
+          <input id="login-email" type="email" placeholder="seu@email.com" autocomplete="username" />
         </label>
 
         <label class="field">
           <span>Senha</span>
-          <input id="login-password" type="password" placeholder="Sua senha" autocomplete="current-password" required />
+          <input id="login-password" type="password" placeholder="Sua senha" autocomplete="current-password" />
         </label>
 
-        <p id="login-error" class="login-error" role="alert"></p>
-
-        <button id="login-button" class="button primary glow-button" type="submit">
-          Entrar
-        </button>
-
-        <p class="login-footnote">Contas sao liberadas pelo administrador.</p>
+        <button id="login-button" class="button primary glow-button" type="submit">Entrar</button>
+        <p class="login-footnote">Login temporariamente simplificado.</p>
       </form>
     </section>
 
     <div id="app-shell" class="app-shell is-hidden">
-      <aside id="sidebar" class="sidebar glass glow-panel">
+      <aside id="sidebar" class="sidebar glass">
         <div class="sidebar-head">
-          <button id="brand-home" class="brand-button" type="button" aria-label="Ir para inicio">
+          <button id="brand-home" class="brand-button" type="button">
             <span class="brand-mark small">AF</span>
             <span class="brand-text">
               <strong>Auto Future</strong>
               <small>Workspace</small>
             </span>
           </button>
-
-          <button id="sidebar-toggle" class="icon-button glow-button" type="button" aria-label="Recolher menu">
-            <span>‹</span>
-          </button>
+          <button id="sidebar-toggle" class="icon-button glow-button" type="button"><span>‹</span></button>
         </div>
 
-        <nav class="side-nav" aria-label="Menu principal">
+        <nav class="side-nav">
           <button class="nav-item active glow-button" type="button" data-page="home">
-            <span class="nav-icon">⌂</span>
-            <span class="nav-label">Inicio</span>
+            <span class="nav-icon">⌂</span><span class="nav-label">Início</span>
           </button>
-
           <button class="nav-item glow-button" type="button" data-page="recording">
-            <span class="nav-icon">●</span>
-            <span class="nav-label">Gravacao</span>
+            <span class="nav-icon">●</span><span class="nav-label">Gravação</span>
           </button>
-
+          <button class="nav-item glow-button" type="button" data-page="editor">
+            <span class="nav-icon">✦</span><span class="nav-label">Editor</span>
+          </button>
           <button class="nav-item glow-button" type="button" data-page="recordings">
-            <span class="nav-icon">▤</span>
-            <span class="nav-label">Gravacoes</span>
+            <span class="nav-icon">▤</span><span class="nav-label">Gravações</span>
           </button>
-
           <button class="nav-item glow-button" type="button" data-page="schedules">
-            <span class="nav-icon">◷</span>
-            <span class="nav-label">Agendamentos</span>
+            <span class="nav-icon">◷</span><span class="nav-label">Agendamentos</span>
           </button>
-
           <button class="nav-item glow-button" type="button" data-page="runs">
-            <span class="nav-icon">↻</span>
-            <span class="nav-label">Execucoes</span>
+            <span class="nav-icon">↻</span><span class="nav-label">Execuções</span>
           </button>
         </nav>
 
         <div class="sidebar-spacer"></div>
-
         <div class="profile">
           <div class="avatar">A</div>
-          <div class="profile-copy">
-            <strong>Administrador</strong>
-            <small>Admin</small>
-          </div>
-          <button id="logout-button" class="icon-button subtle" type="button" aria-label="Sair">↗</button>
+          <div class="profile-copy"><strong>Administrador</strong><small>Admin</small></div>
+          <button id="logout-button" class="icon-button subtle" type="button">↗</button>
         </div>
       </aside>
 
@@ -109,52 +89,36 @@
         <header class="topbar glass">
           <div>
             <p class="eyebrow">AUTO FUTURE</p>
-            <h2 id="page-title">Inicio</h2>
+            <h2 id="page-title">Início</h2>
           </div>
-
           <div class="topbar-actions">
             <div id="status" class="status idle">
-              <span class="status-dot"></span>
-              <span id="status-text">Pronto</span>
+              <span class="status-dot"></span><span id="status-text">Pronto</span>
             </div>
-
-            <button class="button compact primary glow-button" type="button" data-open-page="recording">
-              <span>＋</span>
-              Nova gravacao
-            </button>
+            <button class="button compact primary glow-button" type="button" data-open-page="recording">＋ Nova gravação</button>
           </div>
         </header>
 
-        <section id="page-home" class="page active" data-page-view="home">
+        <section class="page active" data-page-view="home">
           <div class="home-grid">
             <div class="home-intro">
               <p class="eyebrow">PAINEL</p>
-              <h1>Automacao sem atrito.</h1>
-              <p class="home-description">
-                Grave uma rotina no navegador uma vez e deixe o Auto Future repetir por voce.
-              </p>
+              <h1>Automação sem atrito.</h1>
+              <p class="home-description">Grave uma rotina uma vez e deixe o Auto Future repetir por você.</p>
             </div>
-
             <div class="quick-create glass">
               <div class="quick-icon">●</div>
-              <div>
-                <strong>Cadastrar gravacao</strong>
-                <p>Abra o gravador e ensine uma nova rotina.</p>
-              </div>
-              <button class="icon-button glow-button" type="button" data-open-page="recording" aria-label="Cadastrar gravacao">→</button>
+              <div><strong>Cadastrar gravação</strong><p>Ensine uma nova rotina ao sistema.</p></div>
+              <button class="icon-button glow-button" type="button" data-open-page="recording">→</button>
             </div>
           </div>
-
-          <div class="home-space">
-            <div class="ambient-line"></div>
-            <p>Seu espaco de automacoes fica aqui.</p>
-          </div>
+          <div class="home-space"><p>Seu espaço de automações fica aqui.</p></div>
         </section>
 
-        <section id="page-recording" class="page" data-page-view="recording">
+        <section class="page" data-page-view="recording">
           <div class="page-heading">
             <div>
-              <p class="eyebrow">NOVA AUTOMACAO</p>
+              <p class="eyebrow">NOVA AUTOMAÇÃO</p>
               <h1>Gravar navegador</h1>
               <p>Informe o ponto de partida e execute a tarefa normalmente.</p>
             </div>
@@ -162,82 +126,91 @@
 
           <div class="recorder-layout">
             <section class="glass recorder-card">
-              <div class="field-grid">
-                <label class="field">
-                  <span>Nome da gravacao</span>
-                  <input id="record-name" value="Minha primeira automacao" autocomplete="off" />
-                </label>
-
-                <label class="field">
-                  <span>URL inicial</span>
-                  <input id="record-url" type="url" value="https://example.com" autocomplete="off" />
-                </label>
-              </div>
-
+              <label class="field"><span>Nome da gravação</span><input id="record-name" value="Minha primeira automação" /></label>
+              <label class="field"><span>URL inicial</span><input id="record-url" type="url" value="https://example.com" /></label>
               <div class="recorder-actions">
                 <button id="record-button" class="button primary compact glow-button" type="button">● Gravar</button>
                 <button id="stop-button" class="button compact glow-button" type="button" disabled>■ Finalizar</button>
                 <button id="run-button" class="button compact glow-button" type="button" disabled>▶ Executar</button>
-
                 <label class="toggle-row">
-                  <input id="headless-input" type="checkbox" />
-                  <span class="toggle"></span>
-                  <span>Background</span>
+                  <input id="headless-input" type="checkbox" /><span class="toggle"></span><span>Background</span>
                 </label>
               </div>
             </section>
 
             <section class="glass events-card">
               <div class="section-title">
-                <div>
-                  <p class="eyebrow">EVENTOS</p>
-                  <h3>Acoes capturadas</h3>
-                </div>
+                <div><p class="eyebrow">EVENTOS</p><h3>Ações capturadas</h3></div>
                 <strong id="event-count">0</strong>
               </div>
+              <div id="events" class="events"><p class="empty">Os eventos da gravação aparecem aqui.</p></div>
+            </section>
+          </div>
+        </section>
 
-              <div id="events" class="events">
-                <p class="empty">Os eventos da gravacao aparecem aqui.</p>
+        <section class="page editor-page" data-page-view="editor">
+          <div class="page-heading editor-heading">
+            <div>
+              <p class="eyebrow">EDITOR DE AUTOMAÇÃO</p>
+              <h1 id="editor-title">Nenhuma gravação aberta</h1>
+              <p>Vídeo como referência visual, ações editáveis na timeline.</p>
+            </div>
+            <div class="editor-heading-actions">
+              <button id="save-editor-button" class="button compact glow-button" type="button" disabled>Salvar alterações</button>
+              <button id="test-editor-button" class="button compact primary glow-button" type="button" disabled>▶ Testar automação</button>
+            </div>
+          </div>
+
+          <div id="editor-empty" class="placeholder glass">
+            <span class="placeholder-icon">✦</span>
+            <p class="eyebrow">EDITOR</p>
+            <h1>Grave algo primeiro.</h1>
+            <p>Ao finalizar uma gravação, ela será aberta aqui automaticamente.</p>
+          </div>
+
+          <div id="editor-workspace" class="editor-workspace is-hidden">
+            <section class="glass video-panel">
+              <div class="video-frame">
+                <video id="recording-video" controls></video>
+                <div id="video-missing" class="video-missing is-hidden">Vídeo não disponível.</div>
               </div>
+            </section>
+
+            <section class="glass inspector-panel">
+              <p class="eyebrow">AÇÃO SELECIONADA</p>
+              <h3 id="inspector-type">Selecione uma ação</h3>
+
+              <label class="field"><span>Delay antes da ação (ms)</span><input id="inspector-delay" type="number" min="0" disabled /></label>
+              <label class="field"><span>Seletor / destino</span><input id="inspector-selector" disabled /></label>
+              <label class="field"><span>Valor digitado</span><input id="inspector-value" disabled /></label>
+              <button id="delete-action-button" class="button compact danger" type="button" disabled>Excluir ação</button>
+            </section>
+
+            <section class="glass timeline-panel">
+              <div class="timeline-top">
+                <div><p class="eyebrow">TIMELINE</p><h3>Ações da gravação</h3></div>
+                <span id="timeline-duration">0.0s</span>
+              </div>
+              <div id="timeline-ruler" class="timeline-ruler"></div>
+              <div id="timeline-actions" class="timeline-actions"></div>
             </section>
           </div>
         </section>
 
         <section class="page" data-page-view="recordings">
-          <div class="placeholder glass">
-            <span class="placeholder-icon">▤</span>
-            <p class="eyebrow">EM BREVE</p>
-            <h1>Gravacoes</h1>
-            <p>A biblioteca das automacoes salvas entra na proxima etapa.</p>
-          </div>
+          <div class="placeholder glass"><span class="placeholder-icon">▤</span><p class="eyebrow">EM BREVE</p><h1>Gravações</h1><p>A biblioteca completa entra na próxima etapa.</p></div>
         </section>
-
         <section class="page" data-page-view="schedules">
-          <div class="placeholder glass">
-            <span class="placeholder-icon">◷</span>
-            <p class="eyebrow">EM BREVE</p>
-            <h1>Agendamentos</h1>
-            <p>Aqui voce vai escolher dias, horarios e repeticoes.</p>
-          </div>
+          <div class="placeholder glass"><span class="placeholder-icon">◷</span><p class="eyebrow">EM BREVE</p><h1>Agendamentos</h1><p>Dias, horários e repetição ficarão aqui.</p></div>
         </section>
-
         <section class="page" data-page-view="runs">
-          <div class="placeholder glass">
-            <span class="placeholder-icon">↻</span>
-            <p class="eyebrow">EM BREVE</p>
-            <h1>Execucoes</h1>
-            <p>Historico, logs e falhas das automacoes ficarao aqui.</p>
-          </div>
+          <div class="placeholder glass"><span class="placeholder-icon">↻</span><p class="eyebrow">EM BREVE</p><h1>Execuções</h1><p>Histórico, logs e falhas das automações ficarão aqui.</p></div>
         </section>
       </main>
     </div>
 
-    <div id="view-loading" class="view-loading" aria-hidden="true">
-      <div class="loader glass">
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
+    <div id="view-loading" class="view-loading">
+      <div class="loader glass"><span></span><span></span><span></span></div>
     </div>
 
     <script src="./app.js"></script>

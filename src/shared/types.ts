@@ -17,6 +17,7 @@ export interface AutomationRecording {
   initialUrl: string;
   createdAt: string;
   actions: AutomationAction[];
+  videoPath?: string;
 }
 
 export interface RunOptions {

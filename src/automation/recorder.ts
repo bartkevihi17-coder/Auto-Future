@@ -1,5 +1,7 @@
 import { Browser, BrowserContext, Page, chromium } from "playwright";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import fs from "node:fs/promises";
 import { AutomationAction, AutomationRecording } from "../shared/types";
 
 type EventSink = (action: AutomationAction) => void;
@@ -11,12 +13,17 @@ export class BrowserRecorder {
   private recording: AutomationRecording | null = null;
   private lastTimestamp = 0;
 
-  constructor(private readonly onAction?: EventSink) {}
+  constructor(
+    private readonly videoDir: string,
+    private readonly onAction?: EventSink
+  ) {}
 
   async start(initialUrl: string, name = "Nova automacao"): Promise<AutomationRecording> {
     if (this.recording) {
       throw new Error("Ja existe uma gravacao em andamento.");
     }
+
+    await fs.mkdir(this.videoDir, { recursive: true });
 
     this.recording = {
       id: randomUUID(),
@@ -28,7 +35,13 @@ export class BrowserRecorder {
 
     this.lastTimestamp = Date.now();
     this.browser = await chromium.launch({ headless: false });
-    this.context = await this.browser.newContext();
+    this.context = await this.browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      recordVideo: {
+        dir: this.videoDir,
+        size: { width: 1280, height: 720 },
+      },
+    });
 
     await this.context.exposeBinding("__autoFutureRecord", async (_source, payload: unknown) => {
       if (!payload || typeof payload !== "object") return;
@@ -66,13 +79,20 @@ export class BrowserRecorder {
       if (document.querySelectorAll(byName).length === 1) return byName;
     }
 
+    const text = (element.textContent || "").trim().replace(/\\s+/g, " ");
+    if (text && text.length <= 60) {
+      const tag = element.tagName.toLowerCase();
+      const matches = Array.from(document.querySelectorAll(tag)).filter((node) => (node.textContent || "").trim().replace(/\\s+/g, " ") === text);
+      if (matches.length === 1) return tag + ':has-text("' + text.replace(/"/g, '\\\\"') + '")';
+    }
+
     const parts = [];
     let current = element;
 
     while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 6) {
       let part = current.tagName.toLowerCase();
-
       const parent = current.parentElement;
+
       if (parent) {
         const siblings = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
         if (siblings.length > 1) {
@@ -138,11 +158,26 @@ export class BrowserRecorder {
     }
 
     const finished = this.recording;
-    this.recording = null;
+    const video = this.page?.video();
 
     await this.context?.close().catch(() => undefined);
+
+    if (video) {
+      const rawVideoPath = await video.path().catch(() => null);
+      if (rawVideoPath) {
+        const finalPath = path.join(this.videoDir, finished.id + ".webm");
+        if (rawVideoPath !== finalPath) {
+          await fs.rename(rawVideoPath, finalPath).catch(async () => {
+            await fs.copyFile(rawVideoPath, finalPath);
+          });
+        }
+        finished.videoPath = finalPath;
+      }
+    }
+
     await this.browser?.close().catch(() => undefined);
 
+    this.recording = null;
     this.page = null;
     this.context = null;
     this.browser = null;

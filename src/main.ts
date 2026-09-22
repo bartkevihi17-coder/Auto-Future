@@ -1,32 +1,21 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { BrowserRecorder } from "./automation/recorder";
 import { runRecording } from "./automation/runner";
-import { AutomationRecording } from "./shared/types";
+import { AutomationAction, AutomationRecording } from "./shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 let lastRecording: AutomationRecording | null = null;
-let authenticated = false;
-
-const ADMIN_USER = {
-  email: "admin@autofuture.local",
-  password: "AutoFuture@2026",
-  name: "Administrador",
-};
-
-const recorder = new BrowserRecorder((action) => {
-  mainWindow?.webContents.send("recording:action", action);
-});
-
-function assertAuthenticated(): void {
-  if (!authenticated) {
-    throw new Error("Sessao nao autenticada.");
-  }
-}
+let recorder: BrowserRecorder;
 
 function recordingsDir(): string {
   return path.join(app.getPath("userData"), "recordings");
+}
+
+function videosDir(): string {
+  return path.join(recordingsDir(), "videos");
 }
 
 async function persistRecording(recording: AutomationRecording): Promise<string> {
@@ -35,6 +24,13 @@ async function persistRecording(recording: AutomationRecording): Promise<string>
   const filePath = path.join(dir, recording.id + ".json");
   await fs.writeFile(filePath, JSON.stringify(recording, null, 2), "utf8");
   return filePath;
+}
+
+function withVideoUrl(recording: AutomationRecording) {
+  return {
+    ...recording,
+    videoUrl: recording.videoPath ? pathToFileURL(recording.videoPath).href : null,
+  };
 }
 
 function createWindow(): void {
@@ -48,69 +44,69 @@ function createWindow(): void {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+      webSecurity: false,
     },
   });
 
   void mainWindow.loadFile(path.join(__dirname, "..", "src", "renderer", "index.html"));
 }
 
-app.whenReady().then(() => {
-  ipcMain.handle("auth:login", async (_event, payload: { email?: string; password?: string }) => {
-    const email = String(payload?.email ?? "").trim().toLowerCase();
-    const password = String(payload?.password ?? "");
+app.whenReady().then(async () => {
+  await fs.mkdir(videosDir(), { recursive: true });
 
-    if (email === ADMIN_USER.email && password === ADMIN_USER.password) {
-      authenticated = true;
-      return {
-        ok: true,
-        user: {
-          email: ADMIN_USER.email,
-          name: ADMIN_USER.name,
-          role: "admin",
-        },
-      };
-    }
-
-    return {
-      ok: false,
-      message: "E-mail ou senha incorretos.",
-    };
+  recorder = new BrowserRecorder(videosDir(), (action) => {
+    mainWindow?.webContents.send("recording:action", action);
   });
 
-  ipcMain.handle("auth:logout", async () => {
-    authenticated = false;
+  // Login temporariamente desabilitado: qualquer clique em Entrar libera o app.
+  ipcMain.handle("auth:login", async () => ({
+    ok: true,
+    user: {
+      email: "admin@autofuture.local",
+      name: "Administrador",
+      role: "admin",
+    },
+  }));
 
-    if (recorder.isRecording()) {
+  ipcMain.handle("auth:logout", async () => {
+    if (recorder?.isRecording()) {
       await recorder.stop().catch(() => undefined);
     }
-
     return { ok: true };
   });
 
   ipcMain.handle("recording:start", async (_event, payload: { url: string; name?: string }) => {
-    assertAuthenticated();
-
     const url = new URL(payload.url).toString();
     const recording = await recorder.start(url, payload.name?.trim() || "Nova automacao");
     return { id: recording.id, createdAt: recording.createdAt };
   });
 
   ipcMain.handle("recording:stop", async () => {
-    assertAuthenticated();
-
     const recording = await recorder.stop();
     lastRecording = recording;
     const filePath = await persistRecording(recording);
 
     return {
-      recording,
+      recording: withVideoUrl(recording),
       filePath,
     };
   });
 
-  ipcMain.handle("recording:run-last", async (_event, payload?: { headless?: boolean }) => {
-    assertAuthenticated();
+  ipcMain.handle("recording:update-last", async (_event, payload: { actions: AutomationAction[] }) => {
+    if (!lastRecording) {
+      throw new Error("Nenhuma gravacao carregada.");
+    }
 
+    lastRecording.actions = payload.actions;
+    await persistRecording(lastRecording);
+
+    return {
+      ok: true,
+      recording: withVideoUrl(lastRecording),
+    };
+  });
+
+  ipcMain.handle("recording:run-last", async (_event, payload?: { headless?: boolean }) => {
     if (!lastRecording) {
       throw new Error("Nenhuma gravacao foi finalizada nesta sessao.");
     }
