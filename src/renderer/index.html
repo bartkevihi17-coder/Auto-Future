@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Auto Future</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div>
+          <p class="eyebrow">AUTO FUTURE · V0</p>
+          <h1>Grave uma vez.<br />Execute quando quiser.</h1>
+          <p class="subtitle">A primeira base do gravador de automacoes para navegador.</p>
+        </div>
+        <div id="status" class="status idle">Pronto</div>
+      </header>
+
+      <section class="card">
+        <label>
+          Nome da automacao
+          <input id="name" value="Minha primeira automacao" autocomplete="off" />
+        </label>
+
+        <label>
+          URL inicial
+          <input id="url" type="url" value="https://example.com" autocomplete="off" />
+        </label>
+
+        <div class="actions">
+          <button id="record" class="primary">● Gravar</button>
+          <button id="stop" disabled>■ Finalizar</button>
+          <button id="run" disabled>▶ Executar novamente</button>
+
+          <label class="check">
+            <input id="headless" type="checkbox" />
+            Executar em background
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">EVENTOS</p>
+            <h2>Acoes capturadas</h2>
+          </div>
+          <strong id="count">0</strong>
+        </div>
+
+        <div id="events" class="events">
+          <p class="empty">Quando voce iniciar uma gravacao, os eventos aparecem aqui.</p>
+        </div>
+      </section>
+
+      <section class="card note">
+        <strong>V0:</strong>
+        cliques, alteracoes de campos e navegacoes ja entram no fluxo. Senhas sao detectadas e nao sao salvas.
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
