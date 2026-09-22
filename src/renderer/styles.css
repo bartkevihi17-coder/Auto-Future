@@ -2914,6 +2914,20 @@ body.logged-in .background-tint {
   min-width: 132px;
 }
 
+.confirm-modal.is-notice #confirm-modal-cancel {
+  display: none;
+}
+
+.confirm-modal.is-notice .modal-actions {
+  justify-content: flex-end;
+}
+
+.confirm-modal.is-notice #confirm-modal-confirm {
+  background: #27212d;
+  color: #ffffff;
+  border-color: #27212d;
+}
+
 .confirm-modal-card .modal-note {
   border-color: rgba(196, 63, 82, 0.13);
   color: #6f5057;

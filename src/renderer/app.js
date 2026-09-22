@@ -256,6 +256,7 @@ function setStatus(text, kind = "idle") {
 
 function closeConfirmModal() {
   confirmModal.classList.add("is-hidden");
+  confirmModal.classList.remove("is-notice");
   confirmModalConfirm.disabled = false;
   confirmModalCancel.disabled = false;
   confirmModalConfirm.textContent = "Confirmar";
@@ -271,6 +272,26 @@ function openConfirmModal({
   onConfirm,
 }) {
   pendingConfirmAction = onConfirm;
+  confirmModal.classList.remove("is-notice");
+  confirmModalEyebrow.textContent = eyebrow;
+  confirmModalTitle.textContent = title;
+  confirmModalDescription.textContent = description;
+  confirmModalNote.textContent = note;
+  confirmModalNote.classList.toggle("is-hidden", !note);
+  confirmModalConfirm.textContent = confirmLabel;
+  confirmModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => confirmModalConfirm.focus());
+}
+
+function openNoticeModal({
+  eyebrow = "ATENÇÃO",
+  title = "Não foi possível continuar",
+  description = "",
+  note = "",
+  confirmLabel = "Entendi",
+}) {
+  pendingConfirmAction = null;
+  confirmModal.classList.add("is-notice");
   confirmModalEyebrow.textContent = eyebrow;
   confirmModalTitle.textContent = title;
   confirmModalDescription.textContent = description;
@@ -3471,7 +3492,23 @@ async function startRecordingNow() {
     recordButton.disabled = false;
     stopButton.disabled = true;
     setStatus("Erro", "error");
-    alert(error?.message || String(error));
+
+    const message = error?.message || String(error);
+
+    if (
+      message.includes("Ja existe uma automacao chamada") ||
+      message.includes("Já existe uma automação chamada")
+    ) {
+      openNoticeModal({
+        eyebrow: "NOME JÁ EM USO",
+        title: "Escolha outro nome",
+        description: message,
+        note: "Cada automação precisa ter um nome único para evitar confusão na biblioteca e nos agendamentos.",
+        confirmLabel: "Entendi",
+      });
+    } else {
+      alert(message);
+    }
   } finally {
     recordWarningContinue.disabled = false;
     recordWarningContinue.textContent = "Entendi, começar";

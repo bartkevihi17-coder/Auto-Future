@@ -1,4 +1,4 @@
-import { Frame, Page, chromium } from "playwright";
+import { Frame, Locator, Page, chromium } from "playwright";
 import { AutomationAction, AutomationActionType, AutomationRecording, RunOptions } from "../shared/types";
 import { prepareBrowserProfile } from "./browser-profile";
 
@@ -58,6 +58,42 @@ async function waitForOptimizedPage(page: Page): Promise<void> {
     .catch(() => undefined);
 }
 
+async function findVisibleLocator(
+  frame: Frame,
+  selector: string,
+  timeoutMs: number,
+  requireActionable = false
+): Promise<Locator | null> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const locator = frame.locator(selector);
+    const count = await locator.count().catch(() => 0);
+
+    for (let index = 0; index < Math.min(count, 30); index += 1) {
+      const candidate = locator.nth(index);
+      const visible = await candidate.isVisible().catch(() => false);
+
+      if (!visible) continue;
+
+      if (requireActionable) {
+        const actionable = await candidate
+          .click({ trial: true, timeout: 700 })
+          .then(() => true)
+          .catch(() => false);
+
+        if (!actionable) continue;
+      }
+
+      return candidate;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+
+  return null;
+}
+
 async function waitForOptimizedTarget(
   page: Page,
   action: AutomationAction
@@ -72,21 +108,40 @@ async function waitForOptimizedTarget(
   }
 
   const frame = resolveActionFrame(page, action);
-  const locator = frame.locator(action.selector).first();
 
   if (action.type === "click") {
-    await locator.waitFor({ state: "visible", timeout: 20_000 });
-    await locator.click({ trial: true, timeout: 20_000 });
-    return;
+    const locator = await findVisibleLocator(frame, action.selector, 12_000, true);
+
+    if (locator) return;
+
+    const point = await actionPoint(page, frame, action);
+    if (point) return;
+
+    throw new Error(
+      "O elemento gravado nao ficou disponivel para clique dentro do tempo limite."
+    );
   }
 
   if (action.type === "input") {
-    await locator.waitFor({ state: "visible", timeout: 20_000 });
-    return;
+    const locator = await findVisibleLocator(frame, action.selector, 12_000);
+
+    if (locator) return;
+
+    const point = await actionPoint(page, frame, action);
+    if (point) return;
+
+    throw new Error(
+      "O campo gravado nao ficou disponivel dentro do tempo limite."
+    );
   }
 
   if (action.type === "key") {
-    await locator.waitFor({ state: "attached", timeout: 20_000 });
+    const locator = await findVisibleLocator(frame, action.selector, 12_000);
+
+    if (locator) return;
+
+    const point = await actionPoint(page, frame, action);
+    if (point) return;
   }
 }
 
@@ -125,10 +180,16 @@ async function clickAction(page: Page, action: AutomationAction): Promise<void> 
 
   if (action.selector) {
     try {
-      const locator = frame.locator(action.selector).first();
-      await locator.waitFor({ state: "visible", timeout: 8_000 });
-      await locator.click();
-      return;
+      const locator = await findVisibleLocator(frame, action.selector, 8_000, true);
+
+      if (locator) {
+        await locator.click();
+        return;
+      }
+
+      selectorError = new Error(
+        "Nenhum elemento visivel e acionavel corresponde ao seletor gravado."
+      );
     } catch (error) {
       selectorError = error;
     }
@@ -198,10 +259,16 @@ async function inputAction(page: Page, action: AutomationAction): Promise<void> 
 
   if (action.selector) {
     try {
-      const locator = frame.locator(action.selector).first();
-      await locator.waitFor({ state: "visible", timeout: 8_000 });
-      await locator.fill(action.value ?? "");
-      return;
+      const locator = await findVisibleLocator(frame, action.selector, 8_000);
+
+      if (locator) {
+        await locator.fill(action.value ?? "");
+        return;
+      }
+
+      selectorError = new Error(
+        "Nenhum campo visivel corresponde ao seletor gravado."
+      );
     } catch (error) {
       selectorError = error;
     }
