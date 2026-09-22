@@ -4881,3 +4881,107 @@ body.logged-in .background-tint {
     width: 39px;
   }
 }
+
+
+/* ===== Larger cards specifically in the Editor automation list ===== */
+
+#automation-library {
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 12px;
+}
+
+#automation-library .automation-card {
+  min-height: 218px;
+  padding: 15px;
+  border-radius: 15px;
+}
+
+#automation-library .automation-card__top {
+  min-height: 34px;
+}
+
+#automation-library .automation-card__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+#automation-library .automation-card__meta {
+  gap: 5px;
+}
+
+#automation-library .automation-card__meta span,
+#automation-library .automation-card__foot span {
+  padding: 4px 7px;
+  font-size: 8.5px;
+}
+
+#automation-library .automation-card__body {
+  margin: 14px 0 auto;
+}
+
+#automation-library .automation-card__body h3 {
+  margin-bottom: 5px;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+#automation-library .automation-card__body p {
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+#automation-library .automation-card__foot {
+  margin: 11px 0 9px;
+  gap: 6px;
+}
+
+#automation-library .automation-card__notify {
+  min-height: 34px;
+  margin-bottom: 8px;
+  padding: 0 11px;
+}
+
+#automation-library .automation-card__notify .bell-toggle__face {
+  font-size: 8.5px;
+}
+
+#automation-library .automation-card__actions {
+  gap: 7px;
+}
+
+#automation-library .automation-card__actions .button,
+#automation-library .automation-card__actions .fuse-button {
+  height: 32px;
+  font-size: 8.5px;
+}
+
+#automation-library .automation-card.has-tags .automation-card__top {
+  padding-right: 108px;
+}
+
+#automation-library .automation-card__bookmarks {
+  right: 12px;
+  gap: 5px;
+}
+
+#automation-library .automation-bookmark {
+  width: 49px;
+  height: 37px;
+  padding: 5px 5px 9px;
+}
+
+#automation-library .automation-bookmark > span {
+  font-size: 6.8px;
+}
+
+@media (max-width: 760px) {
+  #automation-library {
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  }
+
+  #automation-library .automation-card {
+    min-height: 205px;
+  }
+}
