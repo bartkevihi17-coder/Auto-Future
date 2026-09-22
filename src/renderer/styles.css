@@ -2865,3 +2865,27 @@ body.logged-in .background-tint {
   font-size: 9px;
   line-height: 1.4;
 }
+
+.field select[multiple] {
+  height: auto;
+  min-height: 112px;
+  padding: 6px;
+}
+
+.field select[multiple] option {
+  border-radius: 7px;
+  padding: 8px 9px;
+}
+
+.field select[multiple] option:checked {
+  color: #5f20ad;
+  background: #f1e7ff linear-gradient(0deg, #f1e7ff, #f1e7ff);
+}
+
+.field-help {
+  margin-top: -2px;
+  color: var(--text-faint);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1.4;
+}

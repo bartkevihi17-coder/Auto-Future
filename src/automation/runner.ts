@@ -196,6 +196,15 @@ export async function runRecording(
         return existingUnmapped;
       }
 
+      const openedByPreviousAction = await context
+        .waitForEvent("page", { timeout: 1800 })
+        .catch(() => null);
+
+      if (openedByPreviousAction && !openedByPreviousAction.isClosed()) {
+        pageMap.set(action.pageId, openedByPreviousAction);
+        return openedByPreviousAction;
+      }
+
       const created = await context.newPage();
       pageMap.set(action.pageId, created);
       return created;

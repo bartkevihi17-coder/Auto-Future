@@ -468,16 +468,33 @@ function nextDateForWeekday(weekday) {
   return year + "-" + month + "-" + day;
 }
 
+function selectedScheduleAutomationIds() {
+  if (!scheduleAutomationSelect) return [];
+
+  return [...scheduleAutomationSelect.selectedOptions]
+    .map((option) => option.value)
+    .filter(Boolean);
+}
+
+function setSelectedScheduleAutomationIds(ids = []) {
+  const wanted = new Set(ids.filter(Boolean));
+
+  [...scheduleAutomationSelect.options].forEach((option) => {
+    option.selected = wanted.has(option.value);
+  });
+}
+
 function populateScheduleAutomationSelect() {
   if (!scheduleAutomationSelect) return;
 
-  const current = scheduleAutomationSelect.value;
+  const current = selectedScheduleAutomationIds();
   scheduleAutomationSelect.innerHTML = "";
 
   if (!savedRecordings.length) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "Nenhuma automação salva";
+    option.disabled = true;
     scheduleAutomationSelect.appendChild(option);
     return;
   }
@@ -489,8 +506,12 @@ function populateScheduleAutomationSelect() {
     scheduleAutomationSelect.appendChild(option);
   }
 
-  if (savedRecordings.some((recording) => recording.id === current)) {
-    scheduleAutomationSelect.value = current;
+  const stillAvailable = current.filter((id) =>
+    savedRecordings.some((recording) => recording.id === id)
+  );
+
+  if (stillAvailable.length) {
+    setSelectedScheduleAutomationIds(stillAvailable);
   }
 }
 
@@ -596,13 +617,14 @@ function openScheduleModal(options = {}) {
 
   populateScheduleAutomationSelect();
 
-  const automationId =
-    schedule?.automationId ||
-    options.automationId ||
-    savedRecordings[0]?.id ||
-    "";
+  const automationIds = schedule?.automationId
+    ? [schedule.automationId]
+    : options.automationId
+      ? [options.automationId]
+      : [savedRecordings[0]?.id].filter(Boolean);
 
-  scheduleAutomationSelect.value = automationId;
+  setSelectedScheduleAutomationIds(automationIds);
+  scheduleAutomationSelect.disabled = Boolean(schedule);
   scheduleRepeatInput.checked = schedule ? Boolean(schedule.repeat) : true;
   scheduleVisibleInput.checked = schedule ? schedule.visible !== false : true;
   scheduleSameTimeInput.checked = true;
@@ -659,6 +681,7 @@ function openScheduleModal(options = {}) {
 
 function closeScheduleModal() {
   scheduleModal.classList.add("is-hidden");
+  scheduleAutomationSelect.disabled = false;
   currentScheduleId = null;
 }
 
@@ -1323,7 +1346,16 @@ function renderTimeline() {
       event.stopPropagation();
       selectAction(action.id);
 
-      setEditorGlobalTimeMs(times[index]);
+      const segment = videoSegmentForPage(action.pageId);
+      if (segment?.videoUrl) {
+        const relativeSeconds = Math.max(
+          0,
+          (times[index] - (Number(segment.startedAtMs) || 0)) / 1000
+        );
+        setEditorVideoPage(action.pageId, relativeSeconds);
+      } else {
+        setEditorGlobalTimeMs(times[index]);
+      }
     });
 
     timelineActions.appendChild(button);
@@ -2182,6 +2214,17 @@ scheduleSameTimeInput.addEventListener("change", () => {
   updateScheduleModalMode();
 });
 
+scheduleAutomationSelect.addEventListener("change", () => {
+  if (currentScheduleId) return;
+
+  const selected = [...scheduleAutomationSelect.selectedOptions];
+
+  if (selected.length <= 3) return;
+
+  selected[selected.length - 1].selected = false;
+  alert("O limite é de 3 automações no mesmo agendamento.");
+});
+
 scheduleCancelButton.addEventListener("click", closeScheduleModal);
 
 scheduleRefreshButton.addEventListener("click", () => {
@@ -2189,13 +2232,15 @@ scheduleRefreshButton.addEventListener("click", () => {
 });
 
 scheduleSaveButton.addEventListener("click", async () => {
-  const automationId = scheduleAutomationSelect.value;
-  const automation = savedRecordings.find(
-    (recording) => recording.id === automationId
-  );
+  const automationIds = selectedScheduleAutomationIds();
 
-  if (!automation) {
-    alert("Escolha uma automação.");
+  if (!automationIds.length) {
+    alert("Escolha pelo menos uma automação.");
+    return;
+  }
+
+  if (automationIds.length > 3) {
+    alert("Você pode selecionar no máximo 3 automações por vez.");
     return;
   }
 
@@ -2234,28 +2279,53 @@ scheduleSaveButton.addEventListener("click", async () => {
     (schedule) => schedule.id === currentScheduleId
   );
 
-  const payload = {
-    id: currentScheduleId || undefined,
-    automationId,
-    name: automation.name || "Agendamento",
-    enabled: existing?.enabled !== false,
-    visible,
-    repeat,
-    slots,
-    runDate: repeat ? undefined : scheduleDateInput.value,
-    oneTime: repeat ? undefined : scheduleOneTimeInput.value,
-    createdAt: existing?.createdAt,
-    lastTriggeredKey: existing?.lastTriggeredKey,
-  };
-
   scheduleSaveButton.disabled = true;
   scheduleSaveButton.textContent = "Salvando...";
 
   try {
-    await ipcRenderer.invoke("schedule:save", payload);
+    if (currentScheduleId) {
+      const automationId = automationIds[0];
+      const automation = savedRecordings.find(
+        (recording) => recording.id === automationId
+      );
+
+      if (!automation) {
+        throw new Error("Automação não encontrada.");
+      }
+
+      await ipcRenderer.invoke("schedule:save", {
+        id: currentScheduleId,
+        automationId,
+        name: automation.name || "Agendamento",
+        enabled: existing?.enabled !== false,
+        visible,
+        repeat,
+        slots,
+        runDate: repeat ? undefined : scheduleDateInput.value,
+        oneTime: repeat ? undefined : scheduleOneTimeInput.value,
+        createdAt: existing?.createdAt,
+        lastTriggeredKey: existing?.lastTriggeredKey,
+      });
+    } else {
+      await ipcRenderer.invoke("schedule:save-batch", {
+        automationIds,
+        visible,
+        repeat,
+        slots,
+        runDate: repeat ? undefined : scheduleDateInput.value,
+        oneTime: repeat ? undefined : scheduleOneTimeInput.value,
+      });
+    }
+
     closeScheduleModal();
     await refreshSchedules();
-    setStatus("Agendamento salvo", "success");
+
+    setStatus(
+      automationIds.length > 1
+        ? automationIds.length + " agendamentos salvos"
+        : "Agendamento salvo",
+      "success"
+    );
   } catch (error) {
     setStatus("Erro no agendamento", "error");
     alert(error?.message || String(error));

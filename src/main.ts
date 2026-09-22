@@ -615,6 +615,91 @@ app.whenReady().then(async () => {
     }
   );
 
+  ipcMain.handle(
+    "schedule:save-batch",
+    async (
+      _event,
+      payload: {
+        automationIds?: string[];
+        visible?: boolean;
+        repeat?: boolean;
+        slots?: Array<{ weekday: number; time: string }>;
+        runDate?: string;
+        oneTime?: string;
+      }
+    ) => {
+      const automationIds = [...new Set(payload.automationIds || [])]
+        .filter(Boolean)
+        .slice(0, 3);
+
+      if (!automationIds.length) {
+        throw new Error("Escolha pelo menos uma automacao.");
+      }
+
+      if ((payload.automationIds || []).length > 3) {
+        throw new Error("O limite e de 3 automacoes no mesmo agendamento.");
+      }
+
+      const recordings = await Promise.all(
+        automationIds.map((id) => loadRecordingById(id))
+      );
+
+      const now = new Date().toISOString();
+      const candidates: AutomationSchedule[] = recordings.map((recording) => ({
+        id: randomUUID(),
+        automationId: recording.id,
+        name: recording.name || "Agendamento",
+        enabled: true,
+        visible: payload.visible !== false,
+        repeat: Boolean(payload.repeat),
+        slots: Array.isArray(payload.slots)
+          ? payload.slots
+              .filter(
+                (slot) =>
+                  Number.isInteger(slot.weekday) &&
+                  slot.weekday >= 0 &&
+                  slot.weekday <= 6 &&
+                  /^\d{2}:\d{2}$/.test(slot.time)
+              )
+              .map((slot) => ({
+                weekday: slot.weekday,
+                time: slot.time,
+              }))
+          : [],
+        runDate: payload.runDate,
+        oneTime: payload.oneTime,
+        createdAt: now,
+        updatedAt: now,
+      }));
+
+      for (const schedule of candidates) {
+        if (schedule.repeat && schedule.slots.length === 0) {
+          throw new Error("Escolha pelo menos um dia e horario.");
+        }
+
+        if (!schedule.repeat && (!schedule.runDate || !schedule.oneTime)) {
+          throw new Error("Escolha a data e o horario da execucao.");
+        }
+      }
+
+      const schedules = await readSchedules();
+      const working = [...schedules];
+
+      for (const schedule of candidates) {
+        validateScheduleCapacity(working, schedule);
+        working.push(schedule);
+      }
+
+      await writeSchedules(working);
+      mainWindow?.webContents.send("schedules:changed");
+
+      return {
+        ok: true,
+        schedules: candidates,
+      };
+    }
+  );
+
   ipcMain.handle("schedule:delete", async (_event, id: string) => {
     const schedules = (await readSchedules()).filter(
       (schedule) => schedule.id !== id
