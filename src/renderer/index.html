@@ -184,13 +184,6 @@
               <div class="recorder-actions">
                 <button id="record-button" class="button primary compact" type="button">● Gravar</button>
                 <button id="stop-button" class="button compact" type="button" disabled>■ Finalizar</button>
-                <button id="run-button" class="button compact" type="button" disabled>▶ Executar</button>
-
-                <label class="toggle-row">
-                  <input id="headless-input" type="checkbox" />
-                  <span class="toggle"></span>
-                  <span>Background</span>
-                </label>
               </div>
             </section>
 
@@ -219,8 +212,7 @@
             </div>
 
             <div class="editor-heading-actions">
-              <button id="save-editor-button" class="button compact" type="button" disabled>Salvar</button>
-              <button id="test-editor-button" class="button compact primary" type="button" disabled>▶ Testar</button>
+              <button id="save-editor-button" class="button compact primary" type="button" disabled>Salvar e continuar</button>
             </div>
           </div>
 
@@ -321,6 +313,62 @@
                 Excluir ação
               </button>
             </aside>
+          </div>
+        </section>
+
+        <section class="page execution-page" data-page-view="execution">
+          <div class="page-heading execution-heading">
+            <div>
+              <p class="eyebrow">EXECUÇÃO</p>
+              <h1 id="execution-title">Automação pronta</h1>
+              <p>Revise a configuração e acompanhe cada ação enquanto o fluxo é executado.</p>
+            </div>
+          </div>
+
+          <div class="execution-layout">
+            <section class="surface-card execution-summary">
+              <div class="execution-summary-copy">
+                <p class="eyebrow">FLUXO APROVADO</p>
+                <h3 id="execution-name">Nenhuma automação preparada</h3>
+                <p id="execution-meta">Salve uma edição para preparar a execução.</p>
+              </div>
+
+              <label class="toggle-row execution-toggle">
+                <input id="headless-input" type="checkbox" />
+                <span class="toggle"></span>
+                <span>Executar em background</span>
+              </label>
+
+              <button id="execution-start-button" class="button primary execution-start" type="button" disabled>
+                ▶ Executar agora
+              </button>
+            </section>
+
+            <section class="surface-card execution-progress-card">
+              <div id="execution-dial" class="comet-dial" aria-label="Progresso da execução">
+                <svg class="comet-dial__ring" viewBox="0 0 200 200" aria-hidden="true">
+                  <path id="execution-dial-track" class="comet-dial__track"></path>
+                  <path id="execution-dial-lit" class="comet-dial__lit"></path>
+                  <g id="execution-dial-comet" class="comet-dial__comet">
+                    <path></path><path></path><path></path><path></path>
+                    <path></path><path></path><path></path><path></path>
+                  </g>
+                  <circle id="execution-dial-head" class="comet-dial__head" r="8"></circle>
+                </svg>
+
+                <div class="comet-dial__readout">
+                  <span class="comet-dial__value">
+                    <span id="execution-progress-value" class="comet-dial__figure">0</span>
+                    <span class="comet-dial__unit">%</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="execution-progress-copy">
+                <strong id="execution-progress-label">Aguardando execução</strong>
+                <span id="execution-progress-step">0 de 0 ações</span>
+              </div>
+            </section>
           </div>
         </section>
 

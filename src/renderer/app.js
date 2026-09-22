@@ -14,7 +14,6 @@ const pageTitle = document.querySelector("#page-title");
 
 const recordButton = document.querySelector("#record-button");
 const stopButton = document.querySelector("#stop-button");
-const runButton = document.querySelector("#run-button");
 const recordUrl = document.querySelector("#record-url");
 const recordName = document.querySelector("#record-name");
 const headlessInput = document.querySelector("#headless-input");
@@ -56,7 +55,18 @@ const inspectorSelector = document.querySelector("#inspector-selector");
 const inspectorValue = document.querySelector("#inspector-value");
 const deleteActionButton = document.querySelector("#delete-action-button");
 const saveEditorButton = document.querySelector("#save-editor-button");
-const testEditorButton = document.querySelector("#test-editor-button");
+
+const executionTitle = document.querySelector("#execution-title");
+const executionName = document.querySelector("#execution-name");
+const executionMeta = document.querySelector("#execution-meta");
+const executionStartButton = document.querySelector("#execution-start-button");
+const executionProgressValue = document.querySelector("#execution-progress-value");
+const executionProgressLabel = document.querySelector("#execution-progress-label");
+const executionProgressStep = document.querySelector("#execution-progress-step");
+const executionDialTrack = document.querySelector("#execution-dial-track");
+const executionDialLit = document.querySelector("#execution-dial-lit");
+const executionDialHead = document.querySelector("#execution-dial-head");
+const executionCometPaths = [...document.querySelectorAll("#execution-dial-comet path")];
 
 const rubberTrack = document.querySelector(".rubber-segment");
 const rubberThumb = document.querySelector(".rubber-segment__thumb");
@@ -83,6 +93,7 @@ const pageNames = {
   home: "Início",
   recording: "Gravação",
   editor: "Editor",
+  execution: "Execução",
   recordings: "Gravações",
   schedules: "Agendamentos",
   runs: "Histórico",
@@ -149,12 +160,21 @@ function setRubberIndex(index, animate = true) {
 
 function updateNavigationState(name) {
   sideItems.forEach((item, index) => {
-    const active = item.dataset.page === name;
+    const active = name !== "execution" && item.dataset.page === name;
     item.classList.toggle("active", active);
     sidebarTargets[index] = active ? 1 : 0;
   });
 
-  setRubberIndex(pageToRubberIndex(name));
+  if (name === "execution") {
+    rubberItems.forEach((item) => {
+      item.classList.remove("active");
+      item.setAttribute("aria-checked", "false");
+      item.tabIndex = -1;
+    });
+  } else {
+    setRubberIndex(pageToRubberIndex(name));
+  }
+
   startSidebarAnimation();
 }
 
@@ -387,7 +407,6 @@ function loadEditor(recording) {
   editorTitle.textContent = recording.name || "Gravação";
 
   saveEditorButton.disabled = false;
-  testEditorButton.disabled = false;
 
   playerProgress.value = "0";
   playerProgress.style.setProperty("--progress", "0%");
@@ -412,6 +431,170 @@ function loadEditor(recording) {
   renderTimeline();
   updateVideoUI();
 }
+
+const EXEC_DIAL_R = 80;
+const EXEC_DIAL_SWEEP = 320;
+const EXEC_DIAL_START = 110;
+const EXEC_DIAL_END = EXEC_DIAL_START + EXEC_DIAL_SWEEP;
+let executionDialValue = 0;
+let executionDialTargetValue = 0;
+let executionDialAnimation = null;
+
+function executionDialPoint(deg) {
+  const angle = (deg * Math.PI) / 180;
+  return [
+    100 + Math.cos(angle) * EXEC_DIAL_R,
+    100 + Math.sin(angle) * EXEC_DIAL_R,
+  ];
+}
+
+function executionDialArc(startDeg, endDeg) {
+  const [x0, y0] = executionDialPoint(startDeg);
+  const [x1, y1] = executionDialPoint(endDeg);
+  const largeArc = endDeg - startDeg > 180 ? 1 : 0;
+
+  return (
+    "M " + x0.toFixed(3) + " " + y0.toFixed(3) +
+    " A " + EXEC_DIAL_R + " " + EXEC_DIAL_R +
+    " 0 " + largeArc + " 1 " + x1.toFixed(3) + " " + y1.toFixed(3)
+  );
+}
+
+function paintExecutionDial(value) {
+  const clamped = Math.min(100, Math.max(0, value));
+  const fraction = clamped / 100;
+  const angle = EXEC_DIAL_START + fraction * EXEC_DIAL_SWEEP;
+
+  executionDialTrack.setAttribute("d", executionDialArc(EXEC_DIAL_START, EXEC_DIAL_END));
+  executionDialLit.setAttribute(
+    "d",
+    fraction > 0.0005 ? executionDialArc(EXEC_DIAL_START, angle) : ""
+  );
+
+  const [cx, cy] = executionDialPoint(angle);
+  executionDialHead.setAttribute("cx", cx.toFixed(3));
+  executionDialHead.setAttribute("cy", cy.toFixed(3));
+
+  const motionStrength = Math.min(
+    1,
+    Math.max(0.12, Math.abs(executionDialTargetValue - executionDialValue) / 18)
+  );
+  const reach = 54 * motionStrength;
+  const segment = reach / executionCometPaths.length;
+
+  executionCometPaths.forEach((path, index) => {
+    const weight = 1 - index / executionCometPaths.length;
+    const a0 = Math.max(
+      EXEC_DIAL_START,
+      angle - (index + 1) * segment
+    );
+    const a1 = Math.max(
+      EXEC_DIAL_START,
+      angle - index * segment
+    );
+
+    if (a1 - a0 < 0.01 || fraction === 0) {
+      path.style.opacity = "0";
+      path.setAttribute("d", "");
+      return;
+    }
+
+    path.setAttribute("d", executionDialArc(a0, a1));
+    path.setAttribute("stroke-width", (5 + 9 * weight * motionStrength).toFixed(2));
+    path.style.opacity = (weight * motionStrength * 0.78).toFixed(3);
+  });
+
+  executionProgressValue.textContent = String(Math.round(clamped));
+}
+
+function setExecutionProgress(value, label, stepText) {
+  executionDialTargetValue = Math.min(100, Math.max(0, value));
+
+  if (label) executionProgressLabel.textContent = label;
+  if (stepText) executionProgressStep.textContent = stepText;
+
+  if (executionDialAnimation) {
+    cancelAnimationFrame(executionDialAnimation);
+    executionDialAnimation = null;
+  }
+
+  const from = executionDialValue;
+  const to = executionDialTargetValue;
+  const start = performance.now();
+  const duration = 420;
+
+  const animate = (now) => {
+    const raw = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - raw, 3);
+    executionDialValue = from + (to - from) * eased;
+    paintExecutionDial(executionDialValue);
+
+    if (raw < 1) {
+      executionDialAnimation = requestAnimationFrame(animate);
+    } else {
+      executionDialAnimation = null;
+      executionDialValue = to;
+      paintExecutionDial(to);
+
+      if (to >= 100) {
+        window.setTimeout(() => {
+          executionCometPaths.forEach((path) => {
+            path.style.opacity = "0";
+          });
+        }, 240);
+      }
+    }
+  };
+
+  executionDialAnimation = requestAnimationFrame(animate);
+}
+
+function prepareExecution(recording) {
+  const actions = recording?.actions || [];
+  const times = cumulativeTimes(actions);
+  const totalMs = times[times.length - 1] || 0;
+
+  executionTitle.textContent = recording?.name || "Automação pronta";
+  executionName.textContent = recording?.name || "Automação";
+  executionMeta.textContent =
+    actions.length + " ações · " + formatSeconds(totalMs) + " de tempo gravado";
+
+  executionStartButton.disabled = actions.length === 0;
+  executionDialValue = 0;
+  executionDialTargetValue = 0;
+  setExecutionProgress(
+    0,
+    "Pronta para executar",
+    "0 de " + actions.length + " ações"
+  );
+}
+
+function executionActionLabel(type) {
+  if (type === "click") return "clique";
+  if (type === "input") return "digitação";
+  if (type === "navigate") return "navegação";
+  return "ação";
+}
+
+ipcRenderer.on("execution:progress", (_event, progress) => {
+  const total = Number(progress.total) || 0;
+  const index = Number(progress.index) || 0;
+  const percent = Number(progress.percent) || 0;
+
+  if (progress.phase === "completed" && percent >= 100) {
+    setExecutionProgress(100, "Execução concluída", total + " de " + total + " ações");
+    return;
+  }
+
+  const currentNumber = Math.min(total, Math.max(1, index + (progress.phase === "starting" ? 1 : 0)));
+  const verb = progress.phase === "starting" ? "Executando" : "Concluída";
+
+  setExecutionProgress(
+    percent,
+    verb + " " + executionActionLabel(progress.type),
+    currentNumber + " de " + total + " ações"
+  );
+});
 
 function sidebarFrame(now) {
   const dt = Math.min((now - sidebarLast) / 1000, 0.05);
@@ -697,7 +880,6 @@ async function startRecording() {
     });
 
     stopButton.disabled = false;
-    runButton.disabled = true;
     setStatus("Gravando · " + (result.browserName || "navegador"), "recording");
   } catch (error) {
     recordButton.disabled = false;
@@ -734,7 +916,6 @@ stopButton.addEventListener("click", async () => {
 
     recordButton.disabled = false;
     stopButton.disabled = true;
-    runButton.disabled = false;
 
     setStatus("Salva · " + result.recording.actions.length + " ações", "success");
 
@@ -743,24 +924,6 @@ stopButton.addEventListener("click", async () => {
   } catch (error) {
     setStatus("Erro", "error");
     alert(error?.message || String(error));
-  }
-});
-
-runButton.addEventListener("click", async () => {
-  try {
-    runButton.disabled = true;
-    setStatus("Executando", "working");
-
-    await ipcRenderer.invoke("recording:run-last", {
-      headless: headlessInput.checked,
-    });
-
-    setStatus("Execução concluída", "success");
-  } catch (error) {
-    setStatus("Falhou", "error");
-    alert(error?.message || String(error));
-  } finally {
-    runButton.disabled = false;
   }
 });
 
@@ -791,37 +954,48 @@ saveEditorButton.addEventListener("click", async () => {
     });
 
     currentRecording = result.recording;
+    prepareExecution(currentRecording);
     setStatus("Edição salva", "success");
+    openPage("execution");
   } catch (error) {
     setStatus("Erro ao salvar", "error");
     alert(error?.message || String(error));
   } finally {
     saveEditorButton.disabled = false;
-    saveEditorButton.textContent = "Salvar";
+    saveEditorButton.textContent = "Salvar e continuar";
   }
 });
 
-testEditorButton.addEventListener("click", async () => {
+executionStartButton.addEventListener("click", async () => {
   if (!currentRecording) return;
 
+  executionStartButton.disabled = true;
+  executionStartButton.textContent = "Executando...";
+  setExecutionProgress(
+    0,
+    "Iniciando automação",
+    "0 de " + currentRecording.actions.length + " ações"
+  );
+  setStatus("Executando", "working");
+
   try {
-    await ipcRenderer.invoke("recording:update-last", {
-      actions: currentRecording.actions,
+    await ipcRenderer.invoke("recording:run-last", {
+      headless: headlessInput.checked,
     });
 
-    testEditorButton.disabled = true;
-    testEditorButton.textContent = "Executando...";
-    setStatus("Testando edição", "working");
-
-    await ipcRenderer.invoke("recording:run-last", { headless: false });
-
-    setStatus("Teste concluído", "success");
+    setExecutionProgress(
+      100,
+      "Execução concluída",
+      currentRecording.actions.length + " de " + currentRecording.actions.length + " ações"
+    );
+    setStatus("Execução concluída", "success");
   } catch (error) {
-    setStatus("Teste falhou", "error");
+    executionProgressLabel.textContent = "Execução interrompida";
+    setStatus("Falhou", "error");
     alert(error?.message || String(error));
   } finally {
-    testEditorButton.disabled = false;
-    testEditorButton.textContent = "▶ Testar";
+    executionStartButton.disabled = false;
+    executionStartButton.textContent = "▶ Executar novamente";
   }
 });
 

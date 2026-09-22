@@ -1708,3 +1708,293 @@ body.logged-in .background-tint {
   gap: 8px;
   margin-top: 18px;
 }
+
+/* ===== 0.4 readability + execution flow ===== */
+
+/* Login: keep the glass, but make the content readable even on bright images. */
+.login-card {
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.78), rgba(255,255,255,0.58)),
+    rgba(255,255,255,0.52);
+  border-color: rgba(255,255,255,0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.92),
+    0 26px 72px rgba(29, 24, 38, 0.16);
+  backdrop-filter: blur(20px) saturate(1.25);
+  -webkit-backdrop-filter: blur(20px) saturate(1.25);
+}
+
+.login-brand span,
+.login-copy h1,
+.login-card .login-field > span {
+  color: #26202d !important;
+  text-shadow: none !important;
+}
+
+.login-brand small,
+.login-copy p:last-child,
+.login-footnote {
+  color: #6e6777 !important;
+  text-shadow: none !important;
+}
+
+.login-card .eyebrow {
+  color: #6f2bc2 !important;
+}
+
+.login-card .brand-mark {
+  color: #6f2bc2;
+  border-color: rgba(111, 43, 194, 0.18);
+  background: rgba(255,255,255,0.72);
+  box-shadow: 0 6px 18px rgba(73, 52, 96, 0.08);
+}
+
+.login-card .login-field input {
+  color: #26202d !important;
+  border-color: #d7d1dd !important;
+  background: rgba(255,255,255,0.78) !important;
+  box-shadow: 0 1px 1px rgba(34, 27, 43, 0.03) !important;
+}
+
+.login-card .login-field input::placeholder {
+  color: #8f8897 !important;
+}
+
+.login-card .login-field input:focus {
+  border-color: #b68ee5 !important;
+  box-shadow: 0 0 0 3px rgba(122, 53, 216, 0.08) !important;
+}
+
+/* Sidebar: high contrast first, motion second. */
+.app-shell {
+  grid-template-columns: 164px minmax(0, 1fr);
+}
+
+.sidebar {
+  background: #ffffff;
+  border-right-color: #ded9e4;
+}
+
+.sidebar-head--minimal {
+  justify-content: flex-end;
+  margin: 0 8px 15px 8px;
+}
+
+.line-sidebar {
+  --marker-length: 25px;
+  --max-shift: 7px;
+  --item-gap: 15px;
+  padding-left: var(--marker-length);
+}
+
+.line-sidebar__label {
+  max-width: 126px;
+  color: #342e3a !important;
+  font-size: 12.5px;
+  font-weight: 680;
+  letter-spacing: -0.005em;
+}
+
+.line-sidebar__item.active .line-sidebar__label {
+  color: #6927bc !important;
+  font-weight: 820;
+}
+
+.line-sidebar__marker {
+  background: #cbc5d1 !important;
+}
+
+.line-sidebar__item.active .line-sidebar__marker {
+  background: #7a35d8 !important;
+}
+
+.line-sidebar__item:not(:last-child)::after {
+  background: #e8e4eb !important;
+  opacity: 1 !important;
+}
+
+.profile {
+  border-top-color: #e5e1e8;
+}
+
+.profile-copy strong {
+  color: #342e3a;
+}
+
+.profile-copy small {
+  color: #817989;
+}
+
+/* Execution is deliberately a separate stage after editing. */
+.execution-page {
+  overflow: auto;
+}
+
+.execution-heading {
+  margin-bottom: 18px;
+}
+
+.execution-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.78fr) minmax(360px, 1.22fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.execution-summary,
+.execution-progress-card {
+  min-height: 420px;
+}
+
+.execution-summary {
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+}
+
+.execution-summary-copy h3 {
+  margin: 8px 0 6px;
+  font-size: 25px;
+  letter-spacing: -0.035em;
+}
+
+.execution-summary-copy > p:last-child {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.execution-toggle {
+  margin: auto 0 14px;
+}
+
+.execution-start {
+  width: 100%;
+  min-height: 44px;
+}
+
+.execution-progress-card {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  padding: 26px;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(122,53,216,0.055), transparent 44%),
+    #ffffff;
+}
+
+.execution-progress-copy {
+  display: grid;
+  gap: 4px;
+  text-align: center;
+}
+
+.execution-progress-copy strong {
+  color: #302838;
+  font-size: 14px;
+}
+
+.execution-progress-copy span {
+  color: #8b8492;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* CometDial-inspired non-interactive execution progress. */
+.comet-dial {
+  --cd-accent: #7a35d8;
+  --cd-ink: #d8d2df;
+  --cd-size: 220px;
+  --cd-figure: 42px;
+
+  position: relative;
+  width: var(--cd-size);
+  height: var(--cd-size);
+  color: var(--cd-ink);
+  user-select: none;
+}
+
+.comet-dial__ring {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.comet-dial__track,
+.comet-dial__lit,
+.comet-dial__comet path {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.comet-dial__track {
+  stroke: #ddd7e4;
+  stroke-width: 5;
+  opacity: 0.78;
+}
+
+.comet-dial__lit {
+  stroke: var(--cd-accent);
+  stroke-width: 5;
+  opacity: 0.92;
+  filter: drop-shadow(0 0 5px rgba(122,53,216,0.18));
+}
+
+.comet-dial__comet path {
+  stroke: var(--cd-accent);
+  fill: none;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(122,53,216,0.14));
+}
+
+.comet-dial__head {
+  fill: var(--cd-accent);
+  filter: drop-shadow(0 0 6px rgba(122,53,216,0.26));
+}
+
+.comet-dial__readout {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.comet-dial__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.06em;
+  color: #2c2532;
+  font-size: var(--cd-figure);
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: -0.055em;
+  font-variant-numeric: tabular-nums;
+}
+
+.comet-dial__unit {
+  color: #847c8c;
+  font-size: 0.42em;
+}
+
+/* Execution page is not a permanent nav item; it is reached after editing. */
+.page[data-page-view="execution"].active {
+  display: block;
+}
+
+@media (max-width: 980px) {
+  .execution-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .execution-summary,
+  .execution-progress-card {
+    min-height: 300px;
+  }
+}

@@ -1,17 +1,98 @@
 import { chromium } from "playwright";
-import { AutomationRecording, RunOptions } from "../shared/types";
+import { AutomationActionType, AutomationRecording, RunOptions } from "../shared/types";
+import { prepareBrowserProfile } from "./browser-profile";
+
+export interface RunProgressEvent {
+  index: number;
+  total: number;
+  percent: number;
+  type?: AutomationActionType;
+  phase: "starting" | "completed";
+}
+
+type ProgressSink = (event: RunProgressEvent) => void;
 
 export async function runRecording(
   recording: AutomationRecording,
-  options: RunOptions = { headless: false }
+  browserProfileDir: string,
+  options: RunOptions = { headless: false },
+  onProgress?: ProgressSink
 ): Promise<void> {
-  const browser = await chromium.launch({ headless: options.headless });
+  const preparedProfile = await prepareBrowserProfile(browserProfileDir);
+  const launchArgs = [
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-session-crashed-bubble",
+  ];
+
+  if (preparedProfile.profileDirectory) {
+    launchArgs.push("--profile-directory=" + preparedProfile.profileDirectory);
+  }
+
+  let context;
 
   try {
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    context = await chromium.launchPersistentContext(preparedProfile.userDataDir, {
+      headless: options.headless,
+      channel: preparedProfile.channel,
+      executablePath: preparedProfile.executablePath,
+      viewport: { width: 1280, height: 720 },
+      args: launchArgs,
+    });
+  } catch (firstError) {
+    if (!preparedProfile.channel && !preparedProfile.executablePath) {
+      throw firstError;
+    }
 
-    for (const action of recording.actions) {
+    context = await chromium.launchPersistentContext(preparedProfile.userDataDir, {
+      headless: options.headless,
+      viewport: { width: 1280, height: 720 },
+      args: launchArgs,
+    }).catch(() => {
+      throw firstError;
+    });
+  }
+
+  try {
+    const existingPages = context.pages();
+    const page = existingPages[0] ?? await context.newPage();
+
+    for (const extraPage of existingPages.slice(1)) {
+      await extraPage.close().catch(() => undefined);
+    }
+
+    if (recording.initialUrl && page.url() !== recording.initialUrl) {
+      await page.goto(recording.initialUrl, { waitUntil: "domcontentloaded" });
+    }
+
+    const total = recording.actions.length;
+
+    if (total === 0) {
+      onProgress?.({
+        index: 0,
+        total: 0,
+        percent: 100,
+        phase: "completed",
+      });
+      return;
+    }
+
+    for (let index = 0; index < total; index += 1) {
+      const action = recording.actions[index];
+
+      onProgress?.({
+        index,
+        total,
+        percent: Math.round((index / total) * 100),
+        type: action.type,
+        phase: "starting",
+      });
+
+      const delayMs = Math.max(0, Number(action.delayMs) || 0);
+      if (delayMs > 0) {
+        await page.waitForTimeout(delayMs);
+      }
+
       switch (action.type) {
         case "navigate": {
           if (page.url() !== action.url) {
@@ -30,8 +111,11 @@ export async function runRecording(
 
         case "input": {
           if (!action.selector) break;
+
           if (action.isSecret) {
-            throw new Error("A gravacao contem um campo secreto. Variaveis seguras ainda nao foram configuradas.");
+            throw new Error(
+              "A gravacao contem um campo secreto. Variaveis seguras ainda nao foram configuradas."
+            );
           }
 
           const locator = page.locator(action.selector).first();
@@ -40,8 +124,16 @@ export async function runRecording(
           break;
         }
       }
+
+      onProgress?.({
+        index: index + 1,
+        total,
+        percent: Math.round(((index + 1) / total) * 100),
+        type: action.type,
+        phase: "completed",
+      });
     }
   } finally {
-    await browser.close();
+    await context.close().catch(() => undefined);
   }
 }

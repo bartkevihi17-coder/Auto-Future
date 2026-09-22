@@ -120,7 +120,15 @@ app.whenReady().then(async () => {
       throw new Error("Nenhuma gravacao foi finalizada nesta sessao.");
     }
 
-    await runRecording(lastRecording, { headless: Boolean(payload?.headless) });
+    await runRecording(
+      lastRecording,
+      browserProfileDir(),
+      { headless: Boolean(payload?.headless) },
+      (progress) => {
+        mainWindow?.webContents.send("execution:progress", progress);
+      }
+    );
+
     return { ok: true };
   });
 

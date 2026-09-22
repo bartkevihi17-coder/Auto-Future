@@ -175,11 +175,12 @@ export class BrowserRecorder {
 `,
     });
 
-    for (const restoredPage of this.context.pages()) {
-      await restoredPage.close().catch(() => undefined);
-    }
+    const restoredPages = this.context.pages();
+    this.page = restoredPages[0] ?? await this.context.newPage();
 
-    this.page = await this.context.newPage();
+    for (const extraPage of restoredPages.slice(1)) {
+      await extraPage.close().catch(() => undefined);
+    }
 
     this.page.on("framenavigated", (frame) => {
       if (frame !== this.page?.mainFrame()) return;
