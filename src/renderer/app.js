@@ -3302,16 +3302,20 @@ async function startAiAgent(action) {
       initialHost === "gmail.com" ||
       initialHost.endsWith(".gmail.com");
 
-    if (needsGoogleSession && Number(syncedSession?.googleCookies || 0) === 0) {
+    if (
+      needsGoogleSession &&
+      Number(syncedSession?.googleAuthCookies || 0) === 0
+    ) {
       throw new Error(
-        "O perfil salvo foi encontrado, mas a sessão Google não apareceu entre os cookies importados."
+        "O perfil salvo foi encontrado, mas não há cookies de autenticação Google reutilizáveis nessa sessão."
       );
     }
 
     setAiAgentStatus(
-      "Sessão de " +
-        (syncedSession?.browserName || "navegador") +
-        " carregada · abrindo página...",
+      (syncedSession?.preservedExistingSession
+        ? "Sessão existente preservada"
+        : "Sessão de " + (syncedSession?.browserName || "navegador") + " sincronizada") +
+        " · abrindo página...",
       "working"
     );
 
@@ -3326,7 +3330,7 @@ async function startAiAgent(action) {
 
     if (!aiAgentAction || aiAgentAction.id !== action.id) return;
 
-    const loadedUrl =
+    let loadedUrl =
       aiAgentBrowser.getURL?.() ||
       aiBrowserUrl.textContent ||
       "";
@@ -3335,9 +3339,35 @@ async function startAiAgent(action) {
       needsGoogleSession &&
       /^https:\/\/accounts\.google\.com(?:\/|$)/i.test(loadedUrl)
     ) {
+      setAiAgentStatus(
+        "Google pediu login · reaplicando sessão salva...",
+        "working"
+      );
+
+      const retriedSession = await ipcRenderer.invoke(
+        "ai:browser:sync-session"
+      );
+
+      if (Number(retriedSession?.googleAuthCookies || 0) > 0) {
+        await waitAi(350);
+        aiAgentBrowser.loadURL(initialUrl);
+        await waitForAiBrowserLoad();
+        await waitAi(850);
+
+        loadedUrl =
+          aiAgentBrowser.getURL?.() ||
+          aiBrowserUrl.textContent ||
+          "";
+      }
+    }
+
+    if (
+      needsGoogleSession &&
+      /^https:\/\/accounts\.google\.com(?:\/|$)/i.test(loadedUrl)
+    ) {
       throw new Error(
-        "O Google recusou a sessão importada e tentou abrir a tela de login. " +
-          "O Auto Future interrompeu a execução para não obrigar você a autenticar novamente no navegador da IA."
+        "A sessão Google salva foi sincronizada, mas o Google ainda rejeitou os cookies e tentou abrir a tela de login. " +
+          "O Auto Future interrompeu a execução sem apagar a sessão do navegador da IA."
       );
     }
 

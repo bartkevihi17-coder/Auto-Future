@@ -241,6 +241,112 @@ async function detectBrowserSource(): Promise<BrowserSource | null> {
   return null;
 }
 
+async function detectBrowserSourceForKind(
+  kind: BrowserKind
+): Promise<BrowserSource | null> {
+  if (process.platform !== "win32") return null;
+
+  const localAppData = process.env.LOCALAPPDATA;
+  const programFiles = process.env.PROGRAMFILES;
+  const programFilesX86 = process.env["PROGRAMFILES(X86)"];
+  const detected = await detectDefaultBrowserExecutable();
+  const detectedExe = detected.executablePath;
+  const detectedLower = detectedExe?.toLowerCase() ?? "";
+
+  if (!localAppData) return null;
+
+  if (kind === "chrome") {
+    const executablePath = await firstExisting([
+      detectedLower.includes("chrome") ? detectedExe : undefined,
+      path.join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
+      programFiles
+        ? path.join(programFiles, "Google", "Chrome", "Application", "chrome.exe")
+        : undefined,
+      programFilesX86
+        ? path.join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe")
+        : undefined,
+    ]);
+
+    return executablePath
+      ? {
+          kind,
+          browserName: "Google Chrome",
+          channel: "chrome",
+          executablePath,
+        }
+      : null;
+  }
+
+  if (kind === "edge") {
+    const executablePath = await firstExisting([
+      detectedLower.includes("msedge") ? detectedExe : undefined,
+      programFilesX86
+        ? path.join(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe")
+        : undefined,
+      programFiles
+        ? path.join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe")
+        : undefined,
+    ]);
+
+    return executablePath
+      ? {
+          kind,
+          browserName: "Microsoft Edge",
+          channel: "msedge",
+          executablePath,
+        }
+      : null;
+  }
+
+  if (kind === "brave") {
+    const executablePath = await firstExisting([
+      detectedLower.includes("brave") ? detectedExe : undefined,
+      path.join(
+        localAppData,
+        "BraveSoftware",
+        "Brave-Browser",
+        "Application",
+        "brave.exe"
+      ),
+      programFiles
+        ? path.join(
+            programFiles,
+            "BraveSoftware",
+            "Brave-Browser",
+            "Application",
+            "brave.exe"
+          )
+        : undefined,
+    ]);
+
+    return executablePath
+      ? {
+          kind,
+          browserName: "Brave",
+          executablePath,
+        }
+      : null;
+  }
+
+  const gxPath = path.join(localAppData, "Programs", "Opera GX", "opera.exe");
+  const operaPath = path.join(localAppData, "Programs", "Opera", "opera.exe");
+  const executablePath = await firstExisting([
+    detectedLower.includes("opera") ? detectedExe : undefined,
+    gxPath,
+    operaPath,
+  ]);
+
+  if (!executablePath) return null;
+
+  return {
+    kind,
+    browserName: executablePath.toLowerCase().includes("opera gx")
+      ? "Opera GX"
+      : "Opera",
+    executablePath,
+  };
+}
+
 async function profileDirectories(userDataDir: string): Promise<string[]> {
   const candidates = ["Default"];
 
@@ -349,6 +455,45 @@ async function hasManagedGoogleLogin(userDataDir: string): Promise<boolean> {
 async function resolveManagedProfile(
   managedRootDir: string
 ): Promise<{ source: BrowserSource; userDataDir: string; ready: boolean }> {
+  const savedKinds: BrowserKind[] = ["chrome", "edge", "brave", "opera"];
+  const savedProfiles: Array<{
+    source: BrowserSource;
+    userDataDir: string;
+    markerTime: number;
+  }> = [];
+
+  for (const kind of savedKinds) {
+    const userDataDir = path.join(managedRootDir, kind);
+    const markerPath = path.join(userDataDir, READY_MARKER);
+
+    if (!(await exists(markerPath))) continue;
+    if (!(await hasManagedGoogleLogin(userDataDir))) continue;
+
+    const source = await detectBrowserSourceForKind(kind);
+    if (!source) continue;
+
+    const markerTime = await fs
+      .stat(markerPath)
+      .then((stat) => stat.mtimeMs)
+      .catch(() => 0);
+
+    savedProfiles.push({
+      source,
+      userDataDir,
+      markerTime,
+    });
+  }
+
+  savedProfiles.sort((a, b) => b.markerTime - a.markerTime);
+
+  if (savedProfiles[0]) {
+    return {
+      source: savedProfiles[0].source,
+      userDataDir: savedProfiles[0].userDataDir,
+      ready: true,
+    };
+  }
+
   const source = await detectBrowserSource();
 
   if (!source) {
