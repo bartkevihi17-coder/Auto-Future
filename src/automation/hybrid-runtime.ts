@@ -28,13 +28,20 @@ export interface HybridRuntimeSnapshot {
   url: string;
   title: string;
   text: string;
+  textBlocks: string[];
   elements: HybridRuntimeElement[];
+}
+
+export interface HybridRuntimeReportCandidate {
+  label: string;
+  value: string;
 }
 
 export type HybridRuntimeProposal =
   | {
       status: "done";
       label?: string;
+      reportEntries?: HybridRuntimeReportCandidate[];
     }
   | {
       status: "action";
@@ -45,6 +52,7 @@ export type HybridRuntimeProposal =
       url?: string;
       direction?: "up" | "down";
       label?: string;
+      reportEntries?: HybridRuntimeReportCandidate[];
     };
 
 export interface HybridRuntimePlanRequest {
@@ -70,6 +78,48 @@ function clean(value: unknown, limit: number): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, limit);
+}
+
+function looksLikeHybridCopyControl(
+  element: HybridRuntimeElement | undefined
+): boolean {
+  if (!element) return false;
+
+  return /\b(copiar|copy|clipboard|copiado|c[oó]pia)\b/i.test(
+    [
+      element.text,
+      element.ariaLabel,
+      element.title,
+      element.role,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+async function readHybridClipboardText(page: Page): Promise<string> {
+  try {
+    const url = new URL(page.url());
+
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      await page.context().grantPermissions(
+        ["clipboard-read", "clipboard-write"],
+        { origin: url.origin }
+      ).catch(() => undefined);
+    }
+
+    const value = await page.evaluate(async () => {
+      try {
+        return await navigator.clipboard.readText();
+      } catch {
+        return "";
+      }
+    });
+
+    return clean(value, 8000);
+  } catch {
+    return "";
+  }
 }
 
 export async function captureHybridRuntimeSnapshot(
@@ -175,10 +225,53 @@ export async function captureHybridRuntimeSnapshot(
       });
     }
 
+    const textBlocks: string[] = [];
+    const seenBlocks = new Set<string>();
+    const textBlockSelector = [
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "p",
+      "li",
+      "tr",
+      "td",
+      "th",
+      "dt",
+      "dd",
+      "article",
+      "code",
+      "pre",
+      "[role=row]",
+      "[role=listitem]",
+      "[role=article]",
+      "[role=status]",
+      "[role=alert]",
+    ].join(",");
+
+    for (const element of document.querySelectorAll(textBlockSelector)) {
+      if (textBlocks.length >= 70) break;
+      if (!visible(element)) continue;
+
+      const value = cleanText(
+        (element as HTMLElement).innerText || element.textContent,
+        240
+      );
+
+      if (value.length < 2) continue;
+
+      const key = value.toLocaleLowerCase("pt-BR");
+      if (seenBlocks.has(key)) continue;
+
+      seenBlocks.add(key);
+      textBlocks.push(value);
+    }
+
     return {
       url: location.href,
       title: document.title,
       text: cleanText(document.body?.innerText, 2200),
+      textBlocks,
       elements,
     };
   });
@@ -291,6 +384,12 @@ export async function runHybridDirective(
     loopTotal: number;
     sequenceValue?: string;
     maxSteps?: number;
+    onReportEntry?: (entry: {
+      kind: "copied" | "written" | "important";
+      label: string;
+      value: string;
+      url?: string;
+    }) => void;
   }
 ): Promise<void> {
   const maxSteps = Math.min(
@@ -323,6 +422,20 @@ export async function runHybridDirective(
       visitedPages: [...visitedPages].slice(-80),
       step,
     });
+
+    for (const reportEntry of proposal.reportEntries || []) {
+      const label = clean(reportEntry.label, 180);
+      const value = clean(reportEntry.value, 6000);
+
+      if (label && value) {
+        options.onReportEntry?.({
+          kind: "important",
+          label,
+          value,
+          url: snapshot.url,
+        });
+      }
+    }
 
     if (proposal.status === "done") {
       return;
@@ -363,10 +476,48 @@ export async function runHybridDirective(
       await executeHybridRuntimeProposal(page, proposal);
       event.status = "ok";
 
+      if (proposal.action === "input") {
+        options.onReportEntry?.({
+          kind: "written",
+          label:
+            clean(
+              targetElement?.ariaLabel ||
+                targetElement?.placeholder ||
+                targetElement?.text ||
+                proposal.label ||
+                "Campo preenchido",
+              180
+            ) || "Campo preenchido",
+          value: clean(proposal.value, 6000) || "[campo limpo]",
+          url: snapshot.url,
+        });
+      }
+
       if (
         proposal.action === "click" &&
         targetElement
       ) {
+        if (looksLikeHybridCopyControl(targetElement)) {
+          await page.waitForTimeout(120).catch(() => undefined);
+          const copiedValue = await readHybridClipboardText(page);
+
+          if (copiedValue) {
+            options.onReportEntry?.({
+              kind: "copied",
+              label:
+                clean(
+                  targetElement.ariaLabel ||
+                    targetElement.text ||
+                    targetElement.title ||
+                    "Conteúdo copiado",
+                  180
+                ) || "Conteúdo copiado",
+              value: copiedValue,
+              url: snapshot.url,
+            });
+          }
+        }
+
         const fingerprint = [
           snapshot.url,
           clean(targetElement.href, 320),

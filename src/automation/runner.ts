@@ -4,6 +4,7 @@ import {
   AutomationActionType,
   AutomationHybridDirective,
   AutomationRecording,
+  AutomationRunReportEntryKind,
   RunOptions,
 } from "../shared/types";
 import { prepareBrowserProfile } from "./browser-profile";
@@ -20,6 +21,17 @@ export interface RunProgressEvent {
 
 type ProgressSink = (event: RunProgressEvent) => void;
 type DynamicValueResolver = (action: AutomationAction) => Promise<string>;
+
+export interface RunReportEntryEvent {
+  kind: AutomationRunReportEntryKind;
+  label: string;
+  value: string;
+  url?: string;
+  actionId?: string;
+  hybridDirectiveId?: string;
+}
+
+type ReportSink = (entry: RunReportEntryEvent) => void;
 
 export interface HybridDirectiveExecutionContext {
   page: Page;
@@ -226,6 +238,210 @@ async function clickAction(page: Page, action: AutomationAction): Promise<void> 
   throw new Error("Nao foi possivel localizar o ponto do clique gravado.");
 }
 
+function normalizedSemanticText(action: AutomationAction): string {
+  return [
+    action.targetText,
+    action.targetAriaLabel,
+    action.targetRole,
+    action.targetTitle,
+    action.selector,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("pt-BR");
+}
+
+function isCopyShortcut(action: AutomationAction): boolean {
+  const key = String(action.key || action.code || "").toLowerCase();
+
+  return (
+    (key === "c" || key === "keyc") &&
+    (Boolean(action.ctrlKey) || Boolean(action.metaKey))
+  );
+}
+
+function looksLikeCopyControl(action: AutomationAction): boolean {
+  if (action.type !== "click") return false;
+
+  return /\b(copiar|copy|clipboard|copiado|c[oó]pia)\b/i.test(
+    normalizedSemanticText(action)
+  );
+}
+
+async function readSelectionOrField(
+  page: Page,
+  action: AutomationAction
+): Promise<string> {
+  const frame = resolveActionFrame(page, action);
+
+  return frame
+    .evaluate(({ selector }) => {
+      const clean = (value: unknown) =>
+        String(value ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 6000);
+
+      const selection = clean(window.getSelection()?.toString());
+
+      if (selection) return selection;
+
+      if (!selector) return "";
+
+      let target: Element | null = null;
+
+      try {
+        target = document.querySelector(selector);
+      } catch {
+        target = null;
+      }
+
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        const start = target.selectionStart;
+        const end = target.selectionEnd;
+
+        if (
+          Number.isInteger(start) &&
+          Number.isInteger(end) &&
+          Number(end) > Number(start)
+        ) {
+          return clean(target.value.slice(Number(start), Number(end)));
+        }
+
+        return clean(target.value);
+      }
+
+      if (target instanceof HTMLElement) {
+        return clean(target.innerText || target.textContent);
+      }
+
+      return "";
+    }, { selector: action.selector || "" })
+    .catch(() => "");
+}
+
+async function readCopyControlSourceHint(
+  page: Page,
+  action: AutomationAction
+): Promise<string> {
+  if (!action.selector) return "";
+
+  const frame = resolveActionFrame(page, action);
+
+  return frame
+    .evaluate(({ selector }) => {
+      const clean = (value: unknown) =>
+        String(value ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 8000);
+
+      let target: Element | null = null;
+
+      try {
+        target = document.querySelector(selector);
+      } catch {
+        target = null;
+      }
+
+      if (!target) return "";
+
+      const directAttributes = [
+        "data-clipboard-text",
+        "data-copy",
+        "data-copy-value",
+        "data-value",
+      ];
+
+      for (const attribute of directAttributes) {
+        const value =
+          target.getAttribute(attribute) ||
+          target.closest("[" + attribute + "]")?.getAttribute(attribute);
+
+        if (clean(value)) return clean(value);
+      }
+
+      const container =
+        target.closest(
+          "[data-copy-container],.copy-row,.copy-field,.code-row,.code-block"
+        ) ||
+        target.parentElement;
+
+      if (!container) return "";
+
+      const candidate = container.querySelector(
+        "input,textarea,code,pre,[data-copy-value],[data-clipboard-text]"
+      );
+
+      if (
+        candidate instanceof HTMLInputElement ||
+        candidate instanceof HTMLTextAreaElement
+      ) {
+        return clean(candidate.value);
+      }
+
+      if (candidate) {
+        return clean(
+          candidate.getAttribute("data-copy-value") ||
+            candidate.getAttribute("data-clipboard-text") ||
+            (candidate as HTMLElement).innerText ||
+            candidate.textContent
+        );
+      }
+
+      return "";
+    }, { selector: action.selector })
+    .catch(() => "");
+}
+
+async function readClipboardText(page: Page): Promise<string> {
+  try {
+    const url = new URL(page.url());
+
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      await page.context().grantPermissions(
+        ["clipboard-read", "clipboard-write"],
+        { origin: url.origin }
+      ).catch(() => undefined);
+    }
+
+    const value = await page.evaluate(async () => {
+      try {
+        return await navigator.clipboard.readText();
+      } catch {
+        return "";
+      }
+    });
+
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 8000);
+  } catch {
+    return "";
+  }
+}
+
+function reportLabelForAction(
+  action: AutomationAction,
+  fallback: string
+): string {
+  return (
+    action.targetAriaLabel ||
+    action.targetText ||
+    action.targetTitle ||
+    fallback
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
 async function keyAction(page: Page, action: AutomationAction): Promise<void> {
   const frame = resolveActionFrame(page, action);
 
@@ -277,7 +493,7 @@ async function inputAction(
   page: Page,
   action: AutomationAction,
   resolveDynamicValue?: DynamicValueResolver
-): Promise<void> {
+): Promise<string> {
   const frame = resolveActionFrame(page, action);
   let selectorError: unknown = null;
   const resolvedValue =
@@ -291,7 +507,7 @@ async function inputAction(
 
       if (locator) {
         await locator.fill(resolvedValue);
-        return;
+        return resolvedValue;
       }
 
       selectorError = new Error(
@@ -308,7 +524,7 @@ async function inputAction(
     await page.mouse.click(point.x, point.y);
     await page.keyboard.press("Control+A");
     await page.keyboard.insertText(resolvedValue);
-    return;
+    return resolvedValue;
   }
 
   if (selectorError) throw selectorError;
@@ -321,7 +537,8 @@ export async function runRecording(
   options: RunOptions = { headless: false },
   onProgress?: ProgressSink,
   resolveDynamicValue?: DynamicValueResolver,
-  executeHybridDirective?: HybridDirectiveExecutor
+  executeHybridDirective?: HybridDirectiveExecutor,
+  onReportEntry?: ReportSink
 ): Promise<void> {
   const preparedProfile = await prepareBrowserProfile(browserProfileDir);
   const launchArgs = [
@@ -556,6 +773,17 @@ export async function runRecording(
       }
       const nextAction = recording.actions[index + 1];
 
+      const copyShortcut = isCopyShortcut(action);
+      const copyControl = looksLikeCopyControl(action);
+      const copyFallback =
+        copyShortcut
+          ? await readSelectionOrField(actionPage, action)
+          : "";
+      const copyControlFallback =
+        copyControl
+          ? await readCopyControlSourceHint(actionPage, action)
+          : "";
+
       let expectedNewPage: Promise<Page | null> | null = null;
 
       if (
@@ -588,6 +816,24 @@ export async function runRecording(
         case "click": {
           await clickAction(actionPage, action);
 
+          if (copyControl) {
+            await actionPage.waitForTimeout(120).catch(() => undefined);
+            const copiedValue =
+              (await readClipboardText(actionPage)) ||
+              copyControlFallback;
+
+            if (copiedValue) {
+              onReportEntry?.({
+                kind: "copied",
+                label: reportLabelForAction(action, "Conteúdo copiado"),
+                value: copiedValue,
+                url: actionPage.url(),
+                actionId: action.id,
+                hybridDirectiveId: action.hybridDirectiveId,
+              });
+            }
+          }
+
           if (expectedNewPage && nextAction?.pageId) {
             const openedPage = await expectedNewPage;
 
@@ -613,12 +859,43 @@ export async function runRecording(
             );
           }
 
-          await inputAction(actionPage, action, resolveDynamicValue);
+          const writtenValue = await inputAction(
+            actionPage,
+            action,
+            resolveDynamicValue
+          );
+
+          onReportEntry?.({
+            kind: "written",
+            label: reportLabelForAction(action, "Campo preenchido"),
+            value: writtenValue || "[campo limpo]",
+            url: actionPage.url(),
+            actionId: action.id,
+            hybridDirectiveId: action.hybridDirectiveId,
+          });
           break;
         }
 
         case "key": {
           await keyAction(actionPage, action);
+
+          if (copyShortcut) {
+            await actionPage.waitForTimeout(80).catch(() => undefined);
+            const clipboardValue = await readClipboardText(actionPage);
+            const copiedValue = clipboardValue || copyFallback;
+
+            if (copiedValue) {
+              onReportEntry?.({
+                kind: "copied",
+                label: reportLabelForAction(action, "Conteúdo copiado"),
+                value: copiedValue,
+                url: actionPage.url(),
+                actionId: action.id,
+                hybridDirectiveId: action.hybridDirectiveId,
+              });
+            }
+          }
+
           break;
         }
       }

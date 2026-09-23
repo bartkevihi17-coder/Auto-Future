@@ -145,6 +145,10 @@ const executionDialTrack = document.querySelector("#execution-dial-track");
 const executionDialLit = document.querySelector("#execution-dial-lit");
 const executionDialHead = document.querySelector("#execution-dial-head");
 const executionCometPaths = [...document.querySelectorAll("#execution-dial-comet path")];
+const executionReportCard = document.querySelector("#execution-report-card");
+const executionReportCount = document.querySelector("#execution-report-count");
+const executionReportList = document.querySelector("#execution-report-list");
+const executionReportEmpty = document.querySelector("#execution-report-empty");
 
 const editorSpeedSection = document.querySelector("#editor-speed-section");
 const executionSpeedSection = document.querySelector("#execution-speed-section");
@@ -278,6 +282,8 @@ let currentVideoPageId = null;
 let pendingVideoSeekSeconds = 0;
 let pendingConfirmAction = null;
 let pendingOptimizationEnabled = null;
+let currentExecutionReportEntries = [];
+let currentExecutionRunId = null;
 let recordingLoaderTimerId = null;
 let recordingLoaderMaxTimerId = null;
 let recordingLoaderStartedAt = 0;
@@ -4496,6 +4502,57 @@ async function refreshSchedules() {
   }
 }
 
+function reportKindLabel(kind) {
+  if (kind === "copied") return "Copiado";
+  if (kind === "written") return "Escrito";
+  return "Importante";
+}
+
+function reportEntriesMarkup(entries) {
+  return entries
+    .map((entry) => {
+      const loop =
+        Number(entry.loopIndex) > 0
+          ? '<span class="report-entry__loop">Loop ' +
+            escapeHtml(String(entry.loopIndex)) +
+            "</span>"
+          : "";
+
+      return (
+        '<article class="report-entry report-entry--' +
+        escapeHtml(entry.kind || "important") +
+        '">' +
+          '<div class="report-entry__head">' +
+            "<span>" + escapeHtml(reportKindLabel(entry.kind)) + "</span>" +
+            loop +
+          "</div>" +
+          "<strong>" + escapeHtml(entry.label || "Dado capturado") + "</strong>" +
+          "<pre>" + escapeHtml(entry.value || "") + "</pre>" +
+          (entry.url
+            ? '<small title="' +
+              escapeHtml(entry.url) +
+              '">' +
+              escapeHtml(entry.url) +
+              "</small>"
+            : "") +
+        "</article>"
+      );
+    })
+    .join("");
+}
+
+function renderExecutionReport(entries = currentExecutionReportEntries) {
+  currentExecutionReportEntries = Array.isArray(entries) ? entries : [];
+  const count = currentExecutionReportEntries.length;
+
+  executionReportCount.textContent =
+    count + " " + (count === 1 ? "item" : "itens");
+  executionReportEmpty.classList.toggle("is-hidden", count > 0);
+  executionReportList.innerHTML = count
+    ? reportEntriesMarkup(currentExecutionReportEntries)
+    : "";
+}
+
 function renderRuns(runs) {
   runsList.innerHTML = "";
   runsEmpty.classList.toggle("is-hidden", runs.length > 0);
@@ -4536,6 +4593,25 @@ function renderRuns(runs) {
 
     if (run.error) {
       item.title = run.error;
+    }
+
+    const reportEntries = Array.isArray(run.reportEntries)
+      ? run.reportEntries
+      : [];
+
+    if (reportEntries.length) {
+      const details = document.createElement("details");
+      details.className = "run-report";
+      details.innerHTML =
+        "<summary>Relatório · " +
+        reportEntries.length +
+        " " +
+        (reportEntries.length === 1 ? "item" : "itens") +
+        "</summary>" +
+        '<div class="run-report__entries">' +
+        reportEntriesMarkup(reportEntries) +
+        "</div>";
+      item.appendChild(details);
     }
 
     runsList.appendChild(item);
@@ -5389,6 +5465,8 @@ function setExecutionProgress(value, label, stepText) {
 
 function prepareExecution(recording) {
   const actions = recording?.actions || [];
+  currentExecutionRunId = null;
+  renderExecutionReport([]);
   const speed = normalizeSpeed(recording?.executionSpeed);
 
   currentRecording = {
@@ -5429,6 +5507,31 @@ function executionActionLabel(type) {
   if (type === "navigate") return "navegação";
   return "ação";
 }
+
+ipcRenderer.on("execution:report-entry", (_event, payload) => {
+  const entry = payload?.entry;
+  const automationId = payload?.automationId;
+  const runId = payload?.runId;
+
+  if (!entry || !currentRecording || automationId !== currentRecording.id) {
+    return;
+  }
+
+  if (currentExecutionRunId && runId && currentExecutionRunId !== runId) {
+    return;
+  }
+
+  if (!currentExecutionRunId && runId) {
+    currentExecutionRunId = runId;
+  }
+
+  currentExecutionReportEntries = [
+    ...currentExecutionReportEntries,
+    entry,
+  ].slice(-1200);
+
+  renderExecutionReport(currentExecutionReportEntries);
+});
 
 ipcRenderer.on("execution:progress", (_event, progress) => {
   const total = Number(progress.total) || 0;
@@ -6540,6 +6643,8 @@ executionStartButton.addEventListener("click", async () => {
 
   executionStartButton.disabled = true;
   executionStartButton.textContent = "Executando...";
+  currentExecutionRunId = null;
+  renderExecutionReport([]);
   const executionLoopCount = normalizeLoopCount(currentRecording.loopCount);
 
   setExecutionProgress(
@@ -6578,9 +6683,11 @@ executionStartButton.addEventListener("click", async () => {
           : "")
     );
     setStatus("Execução concluída", "success");
+    await refreshRuns().catch(() => undefined);
   } catch (error) {
     executionProgressLabel.textContent = "Execução interrompida";
     setStatus("Falhou", "error");
+    await refreshRuns().catch(() => undefined);
     alert(error?.message || String(error));
   } finally {
     executionStartButton.disabled = false;

@@ -131,6 +131,22 @@ export interface AutomationSchedule {
 
 export type AutomationRunSource = "manual" | "schedule";
 export type AutomationRunStatus = "running" | "success" | "error";
+export type AutomationRunReportEntryKind =
+  | "copied"
+  | "written"
+  | "important";
+
+export interface AutomationRunReportEntry {
+  id: string;
+  kind: AutomationRunReportEntryKind;
+  label: string;
+  value: string;
+  url?: string;
+  actionId?: string;
+  hybridDirectiveId?: string;
+  loopIndex?: number;
+  createdAt: string;
+}
 
 export interface AutomationRunRecord {
   id: string;
@@ -143,6 +159,7 @@ export interface AutomationRunRecord {
   finishedAt?: string;
   status: AutomationRunStatus;
   error?: string;
+  reportEntries?: AutomationRunReportEntry[];
 }
 
 export interface AutomationFolder {
