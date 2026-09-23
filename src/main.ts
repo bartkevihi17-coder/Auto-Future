@@ -1387,7 +1387,7 @@ app.whenReady().then(async () => {
         snapshot?: unknown;
         rejected?: unknown[];
         contextEvents?: unknown[];
-        manualNote?: string;
+        guidanceNote?: string;
       }
     ) => {
       const objective = String(payload?.objective || "").trim();
@@ -1406,7 +1406,7 @@ app.whenReady().then(async () => {
       const contextEvents = Array.isArray(payload?.contextEvents)
         ? payload.contextEvents.slice(-60)
         : [];
-      const manualNote = String(payload?.manualNote || "").trim();
+      const guidanceNote = String(payload?.guidanceNote || "").trim();
 
       const result = await callQwen(
         settings,
@@ -1424,7 +1424,6 @@ app.whenReady().then(async () => {
               "Trate eventos failed como ações que tentaram executar mas falharam e NÃO devem ser consideradas concluídas. " +
               "Trate eventos analysis-error apenas como falhas internas de análise, sem alterar o progresso do objetivo. " +
               "Trate eventos undo como indicação de que a ação correspondente deixou de contar como concluída. " +
-              "Trate eventos manual como mudanças realizadas diretamente pelo usuário e continue do estado resultante. " +
               "Trate eventos comment como instruções explícitas do usuário para recalcular a ação atual e orientar também as próximas ações; mantenha esses comentários como contexto persistente enquanto forem relevantes. Comentário NÃO é rejeição: você pode manter o mesmo alvo e a mesma ação quando o comentário apenas refinar como ela deve funcionar. " +
               "Se um comentário ou o objetivo disser que um campo deve receber valores diferentes entre loops/execuções, como nomes aleatórios, termos variados ou jogadores de futebol diferentes, use uma ação input dinâmica. " +
               "Para input dinâmico, retorne valueMode=\"ai\", um value concreto para a execução atual e valuePrompt com a regra reutilizável que deverá gerar novos valores futuramente. " +
@@ -1455,8 +1454,8 @@ app.whenReady().then(async () => {
               JSON.stringify(contextEvents).slice(0, 30000) +
               "\n\nAÇÕES REJEITADAS NO ESTADO ATUAL:\n" +
               JSON.stringify(rejected).slice(0, 8000) +
-              (manualNote
-                ? "\n\nINTERAÇÃO MANUAL RECENTE:\n" + manualNote.slice(0, 1500)
+              (guidanceNote
+                ? "\n\nORIENTAÇÃO RECENTE:\n" + guidanceNote.slice(0, 1500)
                 : "")
           }
         ],

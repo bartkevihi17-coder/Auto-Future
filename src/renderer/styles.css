@@ -6190,12 +6190,6 @@ body.logged-in .background-tint {
   background: #f0faf5;
 }
 
-.ai-agent-status.manual {
-  color: #8c5d2f;
-  border-color: #ecdcc8;
-  background: #fff8ef;
-}
-
 .ai-agent-status.error {
   color: #974759;
   border-color: #efcdd5;
@@ -6273,8 +6267,7 @@ body.logged-in .background-tint {
   pointer-events: none;
 }
 
-.ai-agent-proposal,
-.ai-agent-manual-bar {
+.ai-agent-proposal {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6286,26 +6279,22 @@ body.logged-in .background-tint {
   box-shadow: 0 8px 24px rgba(43,34,51,0.08);
 }
 
-.ai-agent-proposal.is-hidden,
-.ai-agent-manual-bar.is-hidden {
+.ai-agent-proposal.is-hidden {
   display: none;
 }
 
-.ai-agent-proposal > div:first-child,
-.ai-agent-manual-bar > div:first-child {
+.ai-agent-proposal > div:first-child {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.ai-agent-proposal strong,
-.ai-agent-manual-bar strong {
+.ai-agent-proposal strong {
   color: #332b39;
   font-size: 11px;
 }
 
-.ai-agent-proposal > div:first-child > span,
-.ai-agent-manual-bar > div:first-child > span {
+.ai-agent-proposal > div:first-child > span {
   color: #837a89;
   font-size: 8px;
   line-height: 1.45;
@@ -6336,8 +6325,7 @@ body.logged-in .background-tint {
     justify-self: start;
   }
 
-  .ai-agent-proposal,
-  .ai-agent-manual-bar {
+  .ai-agent-proposal {
     align-items: stretch;
     flex-direction: column;
   }
@@ -6676,4 +6664,51 @@ body.logged-in .background-tint {
   .ai-agent-comment-bar > div {
     justify-content: flex-end;
   }
+}
+
+
+/* ===== Clearer AI input proposals ===== */
+
+.ai-agent-input-preview {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  border: 1px solid #d9cdea;
+  border-radius: 11px;
+  padding: 9px 11px;
+  background:
+    linear-gradient(145deg, rgba(247,241,255,0.98), rgba(255,255,255,0.98));
+}
+
+.ai-agent-input-preview.is-hidden {
+  display: none;
+}
+
+.ai-agent-input-preview > span {
+  color: #7c6d87;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ai-agent-input-preview > strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #2d2138;
+  font-size: 17px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.ai-agent-input-preview > small {
+  color: #8c7e96;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+#ai-agent-comment {
+  border-color: #d8cae8;
+  color: #664687;
+  background: #faf6ff;
 }

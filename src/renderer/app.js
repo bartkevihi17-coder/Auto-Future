@@ -219,17 +219,17 @@ const aiBrowserUrl = document.querySelector("#ai-browser-url");
 const aiAgentProposal = document.querySelector("#ai-agent-proposal");
 const aiAgentProposalLabel = document.querySelector("#ai-agent-proposal-label");
 const aiAgentProposalDetail = document.querySelector("#ai-agent-proposal-detail");
+const aiAgentInputPreview = document.querySelector("#ai-agent-input-preview");
+const aiAgentInputValue = document.querySelector("#ai-agent-input-value");
+const aiAgentInputMode = document.querySelector("#ai-agent-input-mode");
 const aiAgentApprove = document.querySelector("#ai-agent-approve");
 const aiAgentReject = document.querySelector("#ai-agent-reject");
 const aiAgentUndo = document.querySelector("#ai-agent-undo");
-const aiAgentManual = document.querySelector("#ai-agent-manual");
 const aiAgentComment = document.querySelector("#ai-agent-comment");
 const aiAgentCommentBar = document.querySelector("#ai-agent-comment-bar");
 const aiAgentCommentInput = document.querySelector("#ai-agent-comment-input");
 const aiAgentCommentCancel = document.querySelector("#ai-agent-comment-cancel");
 const aiAgentCommentSend = document.querySelector("#ai-agent-comment-send");
-const aiAgentManualBar = document.querySelector("#ai-agent-manual-bar");
-const aiAgentManualDone = document.querySelector("#ai-agent-manual-done");
 const aiStartUrl = document.querySelector("#ai-start-url");
 const aiPromptInput = document.querySelector("#ai-prompt-input");
 const aiSendButton = document.querySelector("#ai-send-button");
@@ -277,7 +277,6 @@ let aiAgentRejected = [];
 let aiAgentHistory = [];
 let aiAgentContextEvents = [];
 let aiAgentRunning = false;
-let aiAgentManualMode = false;
 let aiAgentRequestSerial = 0;
 const activeFolderBySurface = {
   editor: null,
@@ -2218,6 +2217,56 @@ function describeAiProposal(proposal) {
     : "Ação no navegador";
 }
 
+function renderAiProposalPresentation(proposal) {
+  aiAgentInputPreview.classList.add("is-hidden");
+  aiAgentInputValue.textContent = "";
+  aiAgentInputMode.textContent = "";
+
+  if (!proposal) {
+    aiAgentProposalLabel.textContent = "Aguardando...";
+    aiAgentProposalDetail.textContent = "";
+    return;
+  }
+
+  if (proposal.status === "done") {
+    aiAgentProposalLabel.textContent = proposal.label || "Objetivo concluído";
+    aiAgentProposalDetail.textContent =
+      "A IA considera que o objetivo foi concluído.";
+    return;
+  }
+
+  if (proposal.action === "input") {
+    const target = proposal._targetSnapshot || {};
+    const targetName =
+      target.ariaLabel ||
+      target.placeholder ||
+      target.text ||
+      target.title ||
+      "campo destacado";
+
+    aiAgentProposalLabel.textContent = "Selecionar campo e digitar";
+    aiAgentProposalDetail.textContent =
+      "A IA quer selecionar “" +
+      targetName +
+      "” e preencher esse campo. Se ela escolheu o campo errado, clique em Recusar.";
+
+    aiAgentInputValue.textContent = proposal.value || "valor vazio";
+
+    if (proposal.valueMode === "ai" && proposal.valuePrompt) {
+      aiAgentInputMode.textContent =
+        "Valor dinâmico por IA · " + proposal.valuePrompt;
+    } else {
+      aiAgentInputMode.textContent = "Valor que será digitado nesta ação";
+    }
+
+    aiAgentInputPreview.classList.remove("is-hidden");
+    return;
+  }
+
+  aiAgentProposalLabel.textContent = proposal.label || "Próxima ação";
+  aiAgentProposalDetail.textContent = describeAiProposal(proposal);
+}
+
 function aiTargetSemanticText(target) {
   if (!target) return "";
 
@@ -2397,12 +2446,16 @@ async function showAiTargetBubble(proposal) {
         "white-space:normal"
       ].join(";");
 
-      const actionText =
-        proposal.action === "input" && proposal.value
-          ? proposal.label + "\\n“" + proposal.value + "”"
-          : proposal.label;
-
-      bubble.textContent = actionText;
+      if (proposal.action === "input") {
+        bubble.style.font =
+          "700 14px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif";
+        bubble.textContent =
+          "Selecionar este campo e digitar:\\n“" +
+          (proposal.value || "valor vazio") +
+          "”";
+      } else {
+        bubble.textContent = proposal.label;
+      }
       document.documentElement.appendChild(bubble);
 
       requestAnimationFrame(() => {
@@ -2430,8 +2483,10 @@ async function showAiTargetBubble(proposal) {
 function setAiProposalButtonsVisible(visible) {
   aiAgentApprove.classList.toggle("is-hidden", !visible);
   aiAgentReject.classList.toggle("is-hidden", !visible);
-  aiAgentManual.classList.toggle("is-hidden", !visible);
-  aiAgentComment.classList.toggle("is-hidden", !visible);
+  aiAgentComment.classList.toggle(
+    "is-hidden",
+    !visible || aiAgentProposalState?.action !== "input"
+  );
 }
 
 function closeAiCommentComposer() {
@@ -2442,7 +2497,13 @@ function closeAiCommentComposer() {
 }
 
 function openAiCommentComposer() {
-  if (!aiAgentAction || !aiAgentProposalState) return;
+  if (
+    !aiAgentAction ||
+    !aiAgentProposalState ||
+    aiAgentProposalState.action !== "input"
+  ) {
+    return;
+  }
 
   aiAgentCommentBar.classList.remove("is-hidden");
   requestAnimationFrame(() => aiAgentCommentInput.focus());
@@ -2516,10 +2577,11 @@ function pushAiAgentContextEvent(type, proposal = null, detail = {}) {
   }
 }
 
-async function requestAiAgentProposal(manualNote = "", retryCount = 0) {
-  if (!aiAgentAction || aiAgentManualMode) return;
+async function requestAiAgentProposal(guidanceNote = "", retryCount = 0) {
+  if (!aiAgentAction) return;
 
   const requestId = ++aiAgentRequestSerial;
+  closeAiCommentComposer();
   aiAgentProposal.classList.add("is-hidden");
   aiAgentBrowser.classList.add("is-reviewing");
   setAiAgentStatus("IA analisando a página...", "working");
@@ -2534,7 +2596,7 @@ async function requestAiAgentProposal(manualNote = "", retryCount = 0) {
       snapshot,
       rejected: aiAgentRejected,
       contextEvents: aiAgentContextEvents,
-      manualNote,
+      guidanceNote,
     });
 
     if (requestId !== aiAgentRequestSerial || !aiAgentAction) return;
@@ -2554,20 +2616,15 @@ async function requestAiAgentProposal(manualNote = "", retryCount = 0) {
 
     aiAgentProposalState = proposal;
     aiAgentProposal.classList.remove("is-hidden");
-    aiAgentProposalLabel.textContent =
-      proposal.label ||
-      (proposal.status === "done" ? "Objetivo concluído" : "Próxima ação");
-    aiAgentProposalDetail.textContent =
-      proposal.status === "done"
-        ? "A IA considera que o objetivo foi concluído."
-        : describeAiProposal(proposal);
+    aiAgentReject.textContent = "Recusar";
+    renderAiProposalPresentation(proposal);
 
     if (proposal.status === "done") {
       setAiAgentStatus("Objetivo concluído", "success");
       aiAgentApprove.textContent = "Concluir";
       setAiProposalButtonsVisible(true);
       aiAgentReject.classList.add("is-hidden");
-      aiAgentManual.classList.add("is-hidden");
+      aiAgentComment.classList.add("is-hidden");
       return;
     }
 
@@ -2580,7 +2637,7 @@ async function requestAiAgentProposal(manualNote = "", retryCount = 0) {
 
     const message = error?.message || String(error);
 
-    if (retryCount < 1 && aiAgentAction && !aiAgentManualMode) {
+    if (retryCount < 1 && aiAgentAction) {
       pushAiAgentContextEvent("analysis-error", null, {
         message,
         retry: retryCount + 1,
@@ -2603,14 +2660,16 @@ async function requestAiAgentProposal(manualNote = "", retryCount = 0) {
     aiAgentProposal.classList.remove("is-hidden");
     aiAgentProposalLabel.textContent = "A IA encontrou um problema";
     aiAgentProposalDetail.textContent = message;
+    aiAgentInputPreview.classList.add("is-hidden");
     setAiProposalButtonsVisible(false);
-    aiAgentManual.classList.remove("is-hidden");
+    aiAgentReject.textContent = "Tentar novamente";
+    aiAgentReject.classList.remove("is-hidden");
   }
 }
 
 function syncAiUndoButton() {
   const hasHistory = aiAgentHistory.length > 0;
-  aiAgentUndo.disabled = !hasHistory || aiAgentManualMode || !aiAgentAction;
+  aiAgentUndo.disabled = !hasHistory || !aiAgentAction;
   aiAgentUndo.title = hasHistory
     ? "Voltar a última ação aprovada quando houver uma reversão segura"
     : "Nenhuma ação aprovada para voltar";
@@ -2736,7 +2795,7 @@ async function finalizeAiUndoEntry(entry) {
 }
 
 async function undoAiAgentLastAction() {
-  if (!aiAgentAction || aiAgentManualMode || aiAgentHistory.length === 0) {
+  if (!aiAgentAction || aiAgentHistory.length === 0) {
     return;
   }
 
@@ -2750,7 +2809,7 @@ async function undoAiAgentLastAction() {
         entry.reason ||
         "O site pode ter aplicado uma alteração que não possui reversão segura pelo navegador.",
       note:
-        "Use o modo Manual se precisar corrigir esse estado. O Auto Future não vai fingir que uma alteração externa foi desfeita.",
+        "O Auto Future não vai fingir que uma alteração externa foi desfeita. Continue recusando novas propostas até a IA encontrar um caminho correto.",
       confirmLabel: "Entendi",
     });
     return;
@@ -2759,7 +2818,6 @@ async function undoAiAgentLastAction() {
   aiAgentUndo.disabled = true;
   aiAgentApprove.disabled = true;
   aiAgentReject.disabled = true;
-  aiAgentManual.disabled = true;
   aiAgentRequestSerial += 1;
   aiAgentProposalState = null;
   aiAgentProposal.classList.add("is-hidden");
@@ -2850,13 +2908,12 @@ async function undoAiAgentLastAction() {
       title: "Não foi possível restaurar automaticamente",
       description: error?.message || String(error),
       note:
-        "A ação continua no histórico. Você pode usar o modo Manual para corrigir a página.",
+        "A ação continua no histórico. Continue recusando as próximas sugestões até a IA reencontrar o caminho correto.",
       confirmLabel: "Entendi",
     });
   } finally {
     aiAgentApprove.disabled = false;
     aiAgentReject.disabled = false;
-    aiAgentManual.disabled = false;
     syncAiUndoButton();
   }
 }
@@ -2967,7 +3024,6 @@ async function executeAiAgentProposal() {
   if (proposal.status === "done") {
     aiAgentApprove.disabled = true;
     aiAgentReject.disabled = true;
-    aiAgentManual.disabled = true;
     aiAgentUndo.disabled = true;
 
     try {
@@ -2982,7 +3038,6 @@ async function executeAiAgentProposal() {
     } finally {
       aiAgentApprove.disabled = false;
       aiAgentReject.disabled = false;
-      aiAgentManual.disabled = false;
       syncAiUndoButton();
     }
 
@@ -2991,7 +3046,6 @@ async function executeAiAgentProposal() {
 
   aiAgentApprove.disabled = true;
   aiAgentReject.disabled = true;
-  aiAgentManual.disabled = true;
   aiAgentUndo.disabled = true;
   setAiAgentStatus("Executando ação aprovada...", "working");
 
@@ -3190,48 +3244,8 @@ async function executeAiAgentProposal() {
   } finally {
     aiAgentApprove.disabled = false;
     aiAgentReject.disabled = false;
-    aiAgentManual.disabled = false;
     syncAiUndoButton();
   }
-}
-
-function enterAiAgentManualMode() {
-  if (!aiAgentAction) return;
-
-  aiAgentManualMode = true;
-  aiAgentRequestSerial += 1;
-  aiAgentBrowser.classList.remove("is-reviewing");
-  syncAiUndoButton();
-  aiAgentProposalState = null;
-  aiAgentProposal.classList.add("is-hidden");
-  closeAiCommentComposer();
-  aiAgentManualBar.classList.remove("is-hidden");
-  setAiAgentStatus("Controle manual ativo", "manual");
-  void clearAiTargetBubble();
-  aiAgentBrowser.focus();
-}
-
-async function leaveAiAgentManualMode() {
-  if (!aiAgentAction) return;
-
-  aiAgentManualMode = false;
-  aiAgentBrowser.classList.add("is-reviewing");
-  syncAiUndoButton();
-  aiAgentManualBar.classList.add("is-hidden");
-  aiAgentRejected = [];
-  pushAiAgentContextEvent("manual", null, {
-    note: "O usuário alterou manualmente o estado da página e devolveu o controle para a IA.",
-    resultingUrl:
-      aiAgentBrowser.getURL?.() ||
-      aiBrowserUrl.textContent ||
-      null,
-  });
-  setAiAgentStatus("Devolvendo controle para a IA...", "working");
-
-  await waitAi(350);
-  await requestAiAgentProposal(
-    "O usuário realizou uma interação manual na página. Continue a partir do estado atual."
-  );
 }
 
 async function startAiAgent(action) {
@@ -3253,7 +3267,6 @@ async function startAiAgent(action) {
   aiAgentRejected = [];
   aiAgentHistory = [];
   aiAgentContextEvents = [];
-  aiAgentManualMode = false;
   aiAgentRunning = true;
   aiAgentRequestSerial += 1;
 
@@ -3261,7 +3274,6 @@ async function startAiAgent(action) {
   aiAgentObjective.textContent = action.instruction || "";
   aiAgentProposal.classList.add("is-hidden");
   closeAiCommentComposer();
-  aiAgentManualBar.classList.add("is-hidden");
   aiAgentBrowser.classList.add("is-reviewing");
   aiAgentWorkspace.classList.remove("is-hidden");
   aiAgentWorkspace.closest(".ai-shell")?.classList.add("agent-active");
@@ -3342,15 +3354,14 @@ async function startAiAgent(action) {
     aiAgentProposal.classList.remove("is-hidden");
     aiAgentProposalLabel.textContent = "Não foi possível iniciar";
     aiAgentProposalDetail.textContent = error?.message || String(error);
+    aiAgentInputPreview.classList.add("is-hidden");
     setAiProposalButtonsVisible(false);
-    aiAgentManual.classList.remove("is-hidden");
   }
 }
 
 function forceStopAiAgent() {
   aiAgentRequestSerial += 1;
   aiAgentRunning = false;
-  aiAgentManualMode = false;
 
   try {
     aiAgentBrowser.stop?.();
@@ -3368,7 +3379,6 @@ function forceStopAiAgent() {
 
   aiAgentProposal.classList.add("is-hidden");
   closeAiCommentComposer();
-  aiAgentManualBar.classList.add("is-hidden");
   aiAgentBrowser.classList.remove("is-reviewing");
   aiAgentWorkspace.classList.add("is-hidden");
   aiAgentWorkspace.closest(".ai-shell")?.classList.remove("agent-active");
@@ -3387,7 +3397,6 @@ function forceStopAiAgent() {
 async function closeAiAgent() {
   aiAgentRequestSerial += 1;
   aiAgentRunning = false;
-  aiAgentManualMode = false;
   aiAgentAction = null;
   aiAgentProposalState = null;
   aiAgentRejected = [];
@@ -3400,7 +3409,6 @@ async function closeAiAgent() {
   aiAgentWorkspace.closest(".ai-shell")?.classList.remove("agent-active");
   aiAgentProposal.classList.add("is-hidden");
   closeAiCommentComposer();
-  aiAgentManualBar.classList.add("is-hidden");
   aiAgentBrowser.classList.remove("is-reviewing");
   aiBrowserUrl.textContent = "about:blank";
   aiAgentBrowser.loadURL("about:blank");
@@ -5773,7 +5781,18 @@ aiAgentApprove.addEventListener("click", () => {
 
 aiAgentReject.addEventListener("click", async () => {
   const proposal = aiAgentProposalState;
-  if (!proposal || proposal.status === "done") return;
+
+  if (!proposal) {
+    aiAgentReject.textContent = "Recusar";
+    aiAgentProposal.classList.add("is-hidden");
+    setAiAgentStatus("Tentando analisar novamente...", "working");
+    await requestAiAgentProposal(
+      "A análise anterior falhou. Tente novamente a partir do estado atual da página."
+    );
+    return;
+  }
+
+  if (proposal.status === "done") return;
 
   aiAgentRejected.push({
     action: proposal.action,
@@ -5794,8 +5813,6 @@ aiAgentReject.addEventListener("click", async () => {
   await requestAiAgentProposal();
 });
 
-aiAgentManual.addEventListener("click", enterAiAgentManualMode);
-
 aiAgentComment.addEventListener("click", openAiCommentComposer);
 
 aiAgentCommentCancel.addEventListener("click", closeAiCommentComposer);
@@ -5812,10 +5829,6 @@ aiAgentCommentInput.addEventListener("keydown", (event) => {
     event.preventDefault();
     closeAiCommentComposer();
   }
-});
-
-aiAgentManualDone.addEventListener("click", () => {
-  void leaveAiAgentManualMode();
 });
 
 aiBrowserBack.addEventListener("click", () => {

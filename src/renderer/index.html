@@ -647,11 +647,15 @@
                   <p class="eyebrow">PRÓXIMA AÇÃO</p>
                   <strong id="ai-agent-proposal-label">Aguardando...</strong>
                   <span id="ai-agent-proposal-detail"></span>
+                  <div id="ai-agent-input-preview" class="ai-agent-input-preview is-hidden">
+                    <span>A IA vai digitar</span>
+                    <strong id="ai-agent-input-value"></strong>
+                    <small id="ai-agent-input-mode"></small>
+                  </div>
                 </div>
                 <div class="ai-agent-actions">
                   <button id="ai-agent-undo" class="button" type="button" disabled>↶ Voltar ação</button>
-                  <button id="ai-agent-manual" class="button" type="button">Manual</button>
-                  <button id="ai-agent-comment" class="button" type="button">Comentar</button>
+                  <button id="ai-agent-comment" class="button is-hidden" type="button">Comentar</button>
                   <button id="ai-agent-reject" class="button" type="button">Recusar</button>
                   <button id="ai-agent-approve" class="button primary" type="button">Aprovar</button>
                 </div>
@@ -665,13 +669,6 @@
                 </div>
               </div>
 
-              <div id="ai-agent-manual-bar" class="ai-agent-manual-bar is-hidden">
-                <div>
-                  <strong>Controle manual ativo</strong>
-                  <span>Clique, digite ou navegue livremente. Quando terminar, devolva o controle para a IA.</span>
-                </div>
-                <button id="ai-agent-manual-done" class="button primary" type="button">Continuar com IA</button>
-              </div>
             </div>
 
             <div class="ai-prompt-wrap">
