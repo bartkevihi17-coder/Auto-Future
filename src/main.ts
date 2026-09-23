@@ -1425,7 +1425,7 @@ app.whenReady().then(async () => {
               "Trate eventos analysis-error apenas como falhas internas de análise, sem alterar o progresso do objetivo. " +
               "Trate eventos undo como indicação de que a ação correspondente deixou de contar como concluída. " +
               "Trate eventos manual como mudanças realizadas diretamente pelo usuário e continue do estado resultante. " +
-              "Trate eventos comment como instruções explícitas do usuário para recalcular a ação atual e orientar também as próximas ações; mantenha esses comentários como contexto persistente enquanto forem relevantes. " +
+              "Trate eventos comment como instruções explícitas do usuário para recalcular a ação atual e orientar também as próximas ações; mantenha esses comentários como contexto persistente enquanto forem relevantes. Comentário NÃO é rejeição: você pode manter o mesmo alvo e a mesma ação quando o comentário apenas refinar como ela deve funcionar. " +
               "Se um comentário ou o objetivo disser que um campo deve receber valores diferentes entre loops/execuções, como nomes aleatórios, termos variados ou jogadores de futebol diferentes, use uma ação input dinâmica. " +
               "Para input dinâmico, retorne valueMode=\"ai\", um value concreto para a execução atual e valuePrompt com a regra reutilizável que deverá gerar novos valores futuramente. " +
               "Não reinicie o fluxo e não volte a perguntar/sugerir uma etapa já aprovada, a menos que ela tenha sido desfeita ou que o snapshot atual mostre claramente que voltou a ser necessária. " +

@@ -2424,7 +2424,7 @@ async function showAiTargetBubble(proposal) {
 
       return true;
     })()`
-  );
+  ).catch(() => false);
 }
 
 function setAiProposalButtonsVisible(visible) {
@@ -2465,14 +2465,6 @@ async function submitAiAgentComment() {
     note:
       "Comentário explícito do usuário. Recalcule a ação atual e use esta instrução também nas próximas etapas enquanto continuar relevante.",
   });
-
-  if (proposal.status !== "done") {
-    aiAgentRejected.push({
-      ...compactAiProposal(proposal),
-      reason: "comment-recalculate",
-      comment,
-    });
-  }
 
   aiAgentProposalState = null;
   aiAgentProposal.classList.add("is-hidden");
