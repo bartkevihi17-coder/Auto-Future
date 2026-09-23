@@ -955,6 +955,68 @@
       </div>
     </div>
 
+    <div id="hybrid-comment-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="hybrid-comment-title">
+      <div class="modal-card hybrid-comment-card">
+        <div class="modal-copy">
+          <p class="eyebrow">AUTOMAÇÃO HÍBRIDA</p>
+          <h3 id="hybrid-comment-title">Comentar este campo</h3>
+          <p id="hybrid-comment-field" class="hybrid-comment-field"></p>
+
+          <label class="field hybrid-comment-instruction">
+            <span>O que deve acontecer daqui em diante?</span>
+            <textarea id="hybrid-comment-input" rows="5" placeholder="Ex.: em cada loop pesquise uma marca diferente; processe todos os produtos encontrados e, se houver paginação, percorra todas as páginas até terminar."></textarea>
+          </label>
+
+          <button id="hybrid-comment-analyze" class="button primary" type="button">✦ Analisar padrão</button>
+
+          <section id="hybrid-pattern-panel" class="hybrid-pattern-panel is-hidden" aria-live="polite">
+            <div class="hybrid-pattern-head">
+              <span id="hybrid-pattern-light" class="hybrid-pattern-light"></span>
+              <div>
+                <strong id="hybrid-pattern-status">Analisando...</strong>
+                <small id="hybrid-pattern-confidence"></small>
+              </div>
+            </div>
+
+            <p id="hybrid-pattern-summary" class="hybrid-pattern-summary"></p>
+
+            <div class="hybrid-pattern-grid">
+              <div>
+                <span>Entrada</span>
+                <strong id="hybrid-pattern-input-plan">—</strong>
+              </div>
+              <div>
+                <span>Coleção</span>
+                <strong id="hybrid-pattern-collection">—</strong>
+              </div>
+              <div>
+                <span>Paginação</span>
+                <strong id="hybrid-pattern-pagination">—</strong>
+              </div>
+            </div>
+
+            <label class="field hybrid-adjustment-field">
+              <span>Ajustar o que a IA entendeu</span>
+              <textarea id="hybrid-adjustment-input" rows="3" placeholder="Ex.: não é para editar só o primeiro item; faça isso em todos os produtos de todas as páginas."></textarea>
+            </label>
+
+            <div class="hybrid-pattern-actions">
+              <button id="hybrid-pattern-adjust" class="button" type="button">Recalcular com ajuste</button>
+              <button id="hybrid-pattern-apply" class="button primary" type="button">Usar este padrão e continuar</button>
+            </div>
+          </section>
+
+          <p class="modal-note">
+            Depois de aplicar, as ações que você fizer a partir daqui viram uma demonstração do bloco. Na execução futura, a IA pode adaptar o fluxo, repetir itens e atravessar paginação sem você gravar página por página.
+          </p>
+        </div>
+
+        <div class="modal-actions">
+          <button id="hybrid-comment-cancel" class="button" type="button">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
     <div id="unsupported-page-modal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="unsupported-page-title">
       <div class="modal-card unsupported-page-card">
         <div class="modal-icon">!</div>

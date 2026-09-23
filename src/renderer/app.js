@@ -26,6 +26,24 @@ const browserSetupDescription = document.querySelector("#browser-setup-descripti
 const browserSetupCancel = document.querySelector("#browser-setup-cancel");
 const browserSetupOpen = document.querySelector("#browser-setup-open");
 const browserSetupDone = document.querySelector("#browser-setup-done");
+const hybridCommentModal = document.querySelector("#hybrid-comment-modal");
+const hybridCommentTitle = document.querySelector("#hybrid-comment-title");
+const hybridCommentField = document.querySelector("#hybrid-comment-field");
+const hybridCommentInput = document.querySelector("#hybrid-comment-input");
+const hybridCommentAnalyze = document.querySelector("#hybrid-comment-analyze");
+const hybridCommentCancel = document.querySelector("#hybrid-comment-cancel");
+const hybridPatternPanel = document.querySelector("#hybrid-pattern-panel");
+const hybridPatternLight = document.querySelector("#hybrid-pattern-light");
+const hybridPatternStatus = document.querySelector("#hybrid-pattern-status");
+const hybridPatternConfidence = document.querySelector("#hybrid-pattern-confidence");
+const hybridPatternSummary = document.querySelector("#hybrid-pattern-summary");
+const hybridPatternInputPlan = document.querySelector("#hybrid-pattern-input-plan");
+const hybridPatternCollection = document.querySelector("#hybrid-pattern-collection");
+const hybridPatternPagination = document.querySelector("#hybrid-pattern-pagination");
+const hybridAdjustmentInput = document.querySelector("#hybrid-adjustment-input");
+const hybridPatternAdjust = document.querySelector("#hybrid-pattern-adjust");
+const hybridPatternApply = document.querySelector("#hybrid-pattern-apply");
+
 const unsupportedPageModal = document.querySelector("#unsupported-page-modal");
 const unsupportedPageDescription = document.querySelector("#unsupported-page-description");
 const unsupportedPageUrl = document.querySelector("#unsupported-page-url");
@@ -265,6 +283,9 @@ let recordingLoaderMaxTimerId = null;
 let recordingLoaderStartedAt = 0;
 let currentDetailsRecordingId = null;
 let currentUser = null;
+let hybridRecordingField = null;
+let hybridRecordingDirective = null;
+let hybridAnalysisBusy = false;
 let editorSearchQuery = "";
 let editorTagFilterValue = "";
 let editorSortMode = "default";
@@ -2523,6 +2544,8 @@ async function submitAiAgentComment() {
 
   pushAiAgentContextEvent("comment", proposal, {
     comment,
+    targetSnapshot: proposal._targetSnapshot || null,
+    pageUrlBefore: proposal._pageUrl || null,
     note:
       "Comentário explícito do usuário. Recalcule a ação atual e use esta instrução também nas próximas etapas enquanto continuar relevante.",
   });
@@ -2918,6 +2941,61 @@ async function undoAiAgentLastAction() {
   }
 }
 
+function buildAiHybridCommentPlans() {
+  const comments = aiAgentContextEvents.filter(
+    (event) => event.type === "comment" && event.comment
+  );
+  const plans = [];
+
+  for (let index = 0; index < comments.length; index += 1) {
+    const commentEvent = comments[index];
+    const nextCommentOrder =
+      comments[index + 1]?.order || Number.POSITIVE_INFINITY;
+
+    const approved = aiAgentContextEvents.find(
+      (event) =>
+        event.type === "approved" &&
+        event.order > commentEvent.order &&
+        event.order < nextCommentOrder &&
+        event.proposal
+    );
+
+    if (!approved) continue;
+
+    const instruction = String(commentEvent.comment || "").slice(0, 5000);
+    const affectsFollowingActions =
+      /daqui em diante|depois|em seguida|todos|todas|cada|produto|item|resultado|cadastro|pagin|abrir|clicar|editar|inativ|ativar|salvar/i.test(
+        instruction
+      );
+
+    plans.push({
+      instruction,
+      affectsFollowingActions,
+      startEventOrder: approved.order,
+      endEventOrder: Number.isFinite(nextCommentOrder)
+        ? nextCommentOrder
+        : null,
+      anchorSelector:
+        approved.targetSnapshot?.selector ||
+        commentEvent.targetSnapshot?.selector ||
+        "",
+      anchorUrl:
+        approved.pageUrlBefore ||
+        commentEvent.pageUrlBefore ||
+        commentEvent.pageUrl ||
+        aiAgentAction?.startUrl ||
+        "",
+      fieldLabel:
+        approved.targetSnapshot?.ariaLabel ||
+        approved.targetSnapshot?.placeholder ||
+        approved.targetSnapshot?.text ||
+        "",
+    });
+  }
+
+  return plans;
+}
+
 function buildAiRecordingSteps() {
   const steps = [];
 
@@ -2933,6 +3011,7 @@ function buildAiRecordingSteps() {
             action: "navigate",
             url: proposal.url,
             pageUrl: event.pageUrlBefore || event.pageUrl || null,
+            eventOrder: event.order,
           });
         }
         continue;
@@ -2943,7 +3022,12 @@ function buildAiRecordingSteps() {
 
       steps.push({
         action: proposal.action,
+        eventOrder: event.order,
         selector: target?.selector || "",
+        targetText: target?.text || "",
+        targetAriaLabel: target?.ariaLabel || "",
+        targetRole: target?.role || "",
+        targetTitle: target?.title || "",
         value: proposal.value || "",
         dynamicValuePrompt:
           proposal.valueMode === "ai"
@@ -2993,12 +3077,14 @@ async function promoteAiActionToEditor() {
 
   const actionId = aiAgentAction.id;
   const steps = buildAiRecordingSteps();
+  const hybridComments = buildAiHybridCommentPlans();
 
   setAiAgentStatus("Salvando automação no Editor...", "working");
 
   const result = await ipcRenderer.invoke("ai:action:promote-to-recording", {
     actionId,
     steps,
+    hybridComments,
   });
 
   if (!result?.recording) {
@@ -5420,6 +5506,208 @@ function initRubberSegment() {
     });
   });
 }
+
+function setHybridAnalysisBusy(busy, label = "") {
+  hybridAnalysisBusy = busy;
+  hybridCommentAnalyze.disabled = busy;
+  hybridPatternAdjust.disabled = busy;
+  hybridPatternApply.disabled = busy || !hybridRecordingDirective;
+
+  if (busy) {
+    hybridPatternPanel.classList.remove("is-hidden");
+    hybridPatternLight.className = "hybrid-pattern-light analyzing";
+    hybridPatternStatus.textContent = label || "Analisando padrão...";
+    hybridPatternConfidence.textContent = "A IA está lendo a estrutura atual da página.";
+  }
+}
+
+function closeHybridCommentModal(returnToBrowser = true) {
+  hybridCommentModal.classList.add("is-hidden");
+  hybridRecordingField = null;
+  hybridRecordingDirective = null;
+  hybridAnalysisBusy = false;
+  hybridCommentInput.value = "";
+  hybridAdjustmentInput.value = "";
+  hybridPatternPanel.classList.add("is-hidden");
+
+  if (returnToBrowser) {
+    void ipcRenderer.invoke("recording:hybrid:focus-browser").catch(() => undefined);
+  }
+}
+
+function renderHybridDirectiveAnalysis(result) {
+  const directive = result?.directive;
+  if (!directive) return;
+
+  hybridRecordingDirective = directive;
+  const pattern = directive.pattern || {};
+  const confidence = Math.round((Number(pattern.confidence) || 0) * 100);
+
+  hybridPatternPanel.classList.remove("is-hidden");
+  hybridPatternLight.className =
+    "hybrid-pattern-light " + (pattern.detected ? "found" : "adaptive");
+  hybridPatternStatus.textContent = pattern.detected
+    ? "Padrão encontrado"
+    : "Bloco adaptativo";
+  hybridPatternConfidence.textContent = pattern.detected
+    ? confidence + "% de confiança estrutural"
+    : "A IA vai observar a página em tempo de execução.";
+
+  hybridPatternSummary.textContent =
+    directive.summary || directive.runtimeObjective || "Plano híbrido pronto.";
+
+  const inputPlan = directive.inputPlan || { mode: "fixed" };
+
+  if (inputPlan.mode === "sequence") {
+    const values = Array.isArray(inputPlan.values) ? inputPlan.values : [];
+    hybridPatternInputPlan.textContent =
+      values.length
+        ? "Sequência · " + values.join(" → ")
+        : "Sequência";
+  } else if (inputPlan.mode === "ai") {
+    hybridPatternInputPlan.textContent =
+      "Dinâmico por IA · " + (inputPlan.prompt || "valor variável");
+  } else {
+    hybridPatternInputPlan.textContent = "Valor demonstrado";
+  }
+
+  hybridPatternCollection.textContent = pattern.collectionDetected
+    ? pattern.collectionDescription || "Lista/repetição detectada"
+    : "Não confirmada";
+
+  hybridPatternPagination.textContent = pattern.paginationDetected
+    ? pattern.paginationDescription || "Percorrer todas as páginas"
+    : "Não detectada";
+
+  hybridPatternApply.disabled = false;
+}
+
+async function analyzeHybridComment(adjustment = "") {
+  if (!hybridRecordingField || hybridAnalysisBusy) return;
+
+  const instruction = hybridCommentInput.value.trim();
+
+  if (!instruction) {
+    hybridCommentInput.focus();
+    return;
+  }
+
+  setHybridAnalysisBusy(
+    true,
+    adjustment ? "Recalculando padrão..." : "Procurando padrões..."
+  );
+
+  try {
+    const result = await ipcRenderer.invoke("recording:hybrid:analyze", {
+      field: hybridRecordingField,
+      instruction,
+      adjustment,
+      previousDirective: hybridRecordingDirective,
+    });
+
+    renderHybridDirectiveAnalysis(result);
+    hybridAdjustmentInput.value = "";
+    setStatus(
+      result?.patternFound
+        ? "Padrão híbrido encontrado"
+        : "Plano híbrido adaptativo criado",
+      "success"
+    );
+  } catch (error) {
+    hybridPatternLight.className = "hybrid-pattern-light error";
+    hybridPatternStatus.textContent = "Não consegui analisar";
+    hybridPatternConfidence.textContent = error?.message || String(error);
+    hybridPatternApply.disabled = true;
+    setStatus("Erro ao analisar padrão", "error");
+  } finally {
+    hybridAnalysisBusy = false;
+    hybridCommentAnalyze.disabled = false;
+    hybridPatternAdjust.disabled = false;
+    hybridPatternApply.disabled = !hybridRecordingDirective;
+  }
+}
+
+function openHybridCommentModal(field) {
+  if (!field?.requestComment) return;
+
+  hybridRecordingField = field;
+  hybridRecordingDirective = null;
+  hybridCommentInput.value = "";
+  hybridAdjustmentInput.value = "";
+  hybridPatternPanel.classList.add("is-hidden");
+  hybridPatternLight.className = "hybrid-pattern-light";
+  hybridPatternApply.disabled = true;
+
+  const fieldName =
+    field.label ||
+    field.placeholder ||
+    field.selector ||
+    "campo selecionado";
+
+  hybridCommentTitle.textContent = "Comentar a automação a partir deste campo";
+  hybridCommentField.textContent =
+    "Campo: " + fieldName + " · " + (field.url || "página atual");
+
+  hybridCommentModal.classList.remove("is-hidden");
+  requestAnimationFrame(() => hybridCommentInput.focus());
+}
+
+ipcRenderer.on("recording:editable-field", (_event, field) => {
+  openHybridCommentModal(field);
+});
+
+hybridCommentAnalyze.addEventListener("click", () => {
+  void analyzeHybridComment();
+});
+
+hybridPatternAdjust.addEventListener("click", () => {
+  const adjustment = hybridAdjustmentInput.value.trim();
+  if (!adjustment) {
+    hybridAdjustmentInput.focus();
+    return;
+  }
+
+  void analyzeHybridComment(adjustment);
+});
+
+hybridPatternApply.addEventListener("click", async () => {
+  if (!hybridRecordingDirective || hybridAnalysisBusy) return;
+
+  hybridPatternApply.disabled = true;
+  hybridPatternApply.textContent = "Aplicando...";
+
+  try {
+    const result = await ipcRenderer.invoke("recording:hybrid:apply", {
+      directive: hybridRecordingDirective,
+    });
+
+    if (result?.recording) {
+      currentRecording = {
+        ...(currentRecording || {}),
+        ...result.recording,
+      };
+    }
+
+    setStatus("Padrão híbrido ativo · continue demonstrando", "recording");
+    closeHybridCommentModal(false);
+  } catch (error) {
+    setStatus("Erro ao aplicar padrão híbrido", "error");
+    hybridPatternConfidence.textContent = error?.message || String(error);
+  } finally {
+    hybridPatternApply.disabled = false;
+    hybridPatternApply.textContent = "Usar este padrão e continuar";
+  }
+});
+
+hybridCommentCancel.addEventListener("click", () => {
+  closeHybridCommentModal(true);
+});
+
+hybridCommentModal.addEventListener("click", (event) => {
+  if (event.target === hybridCommentModal) {
+    closeHybridCommentModal(true);
+  }
+});
 
 ipcRenderer.on("recording:action", (_event, action) => addEvent(action));
 

@@ -8,9 +8,15 @@ export interface AutomationAction {
   delayMs: number;
   url: string;
   selector?: string;
+  targetText?: string;
+  targetAriaLabel?: string;
+  targetRole?: string;
+  targetTitle?: string;
   value?: string;
   dynamicValuePrompt?: string;
   dynamicValueContext?: string;
+  dynamicValueSequence?: string[];
+  hybridDirectiveId?: string;
   isSecret?: boolean;
   key?: string;
   code?: string;
@@ -38,6 +44,47 @@ export interface AutomationTag {
   color: string;
 }
 
+export interface AutomationHybridPattern {
+  detected: boolean;
+  confidence: number;
+  description: string;
+  collectionDetected?: boolean;
+  collectionDescription?: string;
+  itemSelector?: string;
+  itemLinkSelector?: string;
+  paginationDetected?: boolean;
+  paginationDescription?: string;
+  nextSelector?: string;
+  nextText?: string;
+}
+
+export interface AutomationHybridInputPlan {
+  mode: "fixed" | "sequence" | "ai";
+  values?: string[];
+  prompt?: string;
+}
+
+export interface AutomationHybridDirective {
+  id: string;
+  scope: "from_here";
+  anchorActionId?: string;
+  anchorSelector: string;
+  anchorUrl: string;
+  anchorPageId?: string;
+  fieldLabel?: string;
+  startActionIndex?: number;
+  instruction: string;
+  summary: string;
+  runtimeObjective: string;
+  inputPlan?: AutomationHybridInputPlan;
+  pattern: AutomationHybridPattern;
+  adjustments?: string[];
+  demonstrationActionIds?: string[];
+  consumeFollowingActions?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface AutomationRecording {
   id: string;
   name: string;
@@ -53,6 +100,7 @@ export interface AutomationRecording {
   optimizationEnabled?: boolean;
   notificationsEnabled?: boolean;
   loopCount?: number;
+  hybridDirectives?: AutomationHybridDirective[];
   folderId?: string;
   tags?: AutomationTag[];
 }

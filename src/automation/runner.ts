@@ -1,5 +1,11 @@
 import { Frame, Locator, Page, chromium } from "playwright";
-import { AutomationAction, AutomationActionType, AutomationRecording, RunOptions } from "../shared/types";
+import {
+  AutomationAction,
+  AutomationActionType,
+  AutomationHybridDirective,
+  AutomationRecording,
+  RunOptions,
+} from "../shared/types";
 import { prepareBrowserProfile } from "./browser-profile";
 
 export interface RunProgressEvent {
@@ -14,6 +20,17 @@ export interface RunProgressEvent {
 
 type ProgressSink = (event: RunProgressEvent) => void;
 type DynamicValueResolver = (action: AutomationAction) => Promise<string>;
+
+export interface HybridDirectiveExecutionContext {
+  page: Page;
+  recording: AutomationRecording;
+  directive: AutomationHybridDirective;
+  demonstrationActions: AutomationAction[];
+}
+
+export type HybridDirectiveExecutor = (
+  context: HybridDirectiveExecutionContext
+) => Promise<void>;
 
 function comparableUrl(value?: string): string {
   if (!value) return "";
@@ -303,7 +320,8 @@ export async function runRecording(
   browserProfileDir: string,
   options: RunOptions = { headless: false },
   onProgress?: ProgressSink,
-  resolveDynamicValue?: DynamicValueResolver
+  resolveDynamicValue?: DynamicValueResolver,
+  executeHybridDirective?: HybridDirectiveExecutor
 ): Promise<void> {
   const preparedProfile = await prepareBrowserProfile(browserProfileDir);
   const launchArgs = [
@@ -472,6 +490,8 @@ export async function runRecording(
       return;
     }
 
+    const completedHybridDirectives = new Set<string>();
+
     for (let index = 0; index < total; index += 1) {
       const action = recording.actions[index];
 
@@ -482,6 +502,45 @@ export async function runRecording(
         type: action.type,
         phase: "starting",
       });
+
+      const hybridDirectiveId = action.hybridDirectiveId;
+      const hybridDirective =
+        hybridDirectiveId && executeHybridDirective
+          ? (recording.hybridDirectives || []).find(
+              (item) => item.id === hybridDirectiveId
+            )
+          : undefined;
+
+      if (
+        hybridDirective &&
+        hybridDirective.consumeFollowingActions === true
+      ) {
+        if (!completedHybridDirectives.has(hybridDirective.id)) {
+          const actionPage = await resolvePageForAction(action);
+          const demonstrationActions = recording.actions.filter(
+            (candidate) =>
+              candidate.hybridDirectiveId === hybridDirective.id
+          );
+
+          await executeHybridDirective!({
+            page: actionPage,
+            recording,
+            directive: hybridDirective,
+            demonstrationActions,
+          });
+
+          completedHybridDirectives.add(hybridDirective.id);
+        }
+
+        onProgress?.({
+          index: index + 1,
+          total,
+          percent: Math.round(((index + 1) / total) * 100),
+          type: action.type,
+          phase: "completed",
+        });
+        continue;
+      }
 
       const recordedDelayMs = Math.max(0, Number(action.delayMs) || 0);
       const delayMs = recordedDelayMs / speed;

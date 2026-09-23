@@ -2,7 +2,11 @@ import { BrowserContext, Page, chromium } from "playwright";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { AutomationAction, AutomationRecording } from "../shared/types";
+import {
+  AutomationAction,
+  AutomationHybridDirective,
+  AutomationRecording,
+} from "../shared/types";
 import { prepareBrowserProfile } from "./browser-profile";
 
 type EventSink = (action: AutomationAction) => void;
@@ -15,6 +19,32 @@ export interface UnsupportedPageInfo {
 }
 
 type UnsupportedSink = (info: UnsupportedPageInfo) => void;
+
+export interface EditableFieldInfo {
+  selector: string;
+  url: string;
+  label?: string;
+  placeholder?: string;
+  inputType?: string;
+  frameUrl?: string;
+  frameName?: string;
+  pageId?: string;
+  x?: number;
+  y?: number;
+  requestComment?: boolean;
+}
+
+export interface HybridRecordingSnapshot {
+  url: string;
+  title: string;
+  text: string;
+  anchor?: Record<string, unknown>;
+  elements: Array<Record<string, unknown>>;
+  paginationCandidates: Array<Record<string, unknown>>;
+  repeatedGroups: Array<Record<string, unknown>>;
+}
+
+type EditableSink = (info: EditableFieldInfo) => void;
 
 export class BrowserRecorder {
   private context: BrowserContext | null = null;
@@ -31,13 +61,15 @@ export class BrowserRecorder {
   private trackedPages = new Map<Page, { pageId: string; startedAtMs: number }>();
   private lastRecordedUrlByPage = new Map<string, string>();
   private domainIconPromise: Promise<void> | null = null;
+  private activeHybridDirectiveId: string | null = null;
 
   constructor(
     private readonly videoDir: string,
     private readonly iconDir: string,
     private readonly browserProfileDir: string,
     private readonly onAction?: EventSink,
-    private readonly onUnsupported?: UnsupportedSink
+    private readonly onUnsupported?: UnsupportedSink,
+    private readonly onEditable?: EditableSink
   ) {}
 
   async start(initialUrl: string, name = "Nova automacao"): Promise<AutomationRecording> {
@@ -58,6 +90,7 @@ export class BrowserRecorder {
     this.trackedPages.clear();
     this.lastRecordedUrlByPage.clear();
     this.domainIconPromise = null;
+    this.activeHybridDirectiveId = null;
 
     const launchArgs = [
       "--no-first-run",
@@ -108,6 +141,7 @@ export class BrowserRecorder {
       executionSpeed: 1,
       optimizationEnabled: true,
       notificationsEnabled: false,
+      hybridDirectives: [],
     };
 
     this.lastTimestamp = Date.now();
@@ -129,6 +163,13 @@ export class BrowserRecorder {
         metaKey?: boolean;
         x?: number;
         y?: number;
+        label?: string;
+        placeholder?: string;
+        inputType?: string;
+        targetText?: string;
+        targetAriaLabel?: string;
+        targetRole?: string;
+        targetTitle?: string;
       };
 
       const sourcePage = source.page ?? source.frame.page();
@@ -142,6 +183,26 @@ export class BrowserRecorder {
       }
 
       const sourceUrl = data.url ?? source.frame.url() ?? sourcePage?.url() ?? initialUrl;
+
+      if (
+        data.type === "editable-focus" ||
+        data.type === "editable-comment"
+      ) {
+        this.onEditable?.({
+          selector: String(data.selector || ""),
+          url: sourceUrl,
+          label: data.label,
+          placeholder: data.placeholder,
+          inputType: data.inputType,
+          frameUrl: source.frame.url(),
+          frameName: source.frame.name() || undefined,
+          pageId: sourcePage ? this.pageIds.get(sourcePage) : undefined,
+          x: Number.isFinite(data.x) ? Number(data.x) : undefined,
+          y: Number.isFinite(data.y) ? Number(data.y) : undefined,
+          requestComment: data.type === "editable-comment",
+        });
+        return;
+      }
 
       if (data.type === "navigate") {
         if (sourcePage) {
@@ -159,6 +220,10 @@ export class BrowserRecorder {
       this.recordAction({
         type: data.type,
         selector: data.selector,
+        targetText: data.targetText,
+        targetAriaLabel: data.targetAriaLabel,
+        targetRole: data.targetRole,
+        targetTitle: data.targetTitle,
         value: data.value,
         url: sourceUrl,
         isSecret: Boolean(data.isSecret),
@@ -274,6 +339,227 @@ export class BrowserRecorder {
     }
   };
 
+  const isEditable = (element) =>
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement ||
+    (element instanceof HTMLElement && element.isContentEditable);
+
+  const isCommentableEditable = (element) => {
+    if (element instanceof HTMLTextAreaElement) return true;
+    if (element instanceof HTMLElement && element.isContentEditable) return true;
+    if (!(element instanceof HTMLInputElement)) return false;
+
+    const type = String(element.type || "text").toLowerCase();
+
+    return ![
+      "password",
+      "checkbox",
+      "radio",
+      "button",
+      "submit",
+      "reset",
+      "file",
+      "range",
+      "color",
+      "hidden",
+    ].includes(type);
+  };
+
+  const editableLabel = (element) => {
+    if (!(element instanceof Element)) return "";
+
+    const aria = element.getAttribute("aria-label");
+    if (aria) return aria;
+
+    const labelledBy = element.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const text = labelledBy
+        .split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent || "")
+        .join(" ")
+        .trim();
+
+      if (text) return text;
+    }
+
+    if (element.id) {
+      try {
+        const label = document.querySelector(
+          'label[for="' + cssEscape(element.id) + '"]'
+        );
+        const text = (label?.textContent || "").trim();
+        if (text) return text;
+      } catch {}
+    }
+
+    const wrappingLabel = element.closest("label");
+    if (wrappingLabel) {
+      const text = (wrappingLabel.textContent || "").trim();
+      if (text) return text;
+    }
+
+    return (
+      element.getAttribute("placeholder") ||
+      element.getAttribute("name") ||
+      ""
+    );
+  };
+
+  const semanticMeta = (element) => {
+    if (!(element instanceof Element)) {
+      return {
+        targetText: "",
+        targetAriaLabel: "",
+        targetRole: "",
+        targetTitle: ""
+      };
+    }
+
+    return {
+      targetText: String(
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement
+          ? editableLabel(element)
+          : element.innerText || element.textContent || ""
+      ).replace(/\s+/g, " ").trim().slice(0, 220),
+      targetAriaLabel: String(
+        element.getAttribute("aria-label") || ""
+      ).replace(/\s+/g, " ").trim().slice(0, 180),
+      targetRole: String(
+        element.getAttribute("role") || ""
+      ).replace(/\s+/g, " ").trim().slice(0, 60),
+      targetTitle: String(
+        element.getAttribute("title") || ""
+      ).replace(/\s+/g, " ").trim().slice(0, 180)
+    };
+  };
+
+  let commentButton = null;
+  let commentTarget = null;
+
+  const removeCommentButton = () => {
+    commentButton?.remove();
+    commentButton = null;
+    commentTarget = null;
+  };
+
+  const positionCommentButton = () => {
+    if (!commentButton || !commentTarget || !document.contains(commentTarget)) {
+      removeCommentButton();
+      return;
+    }
+
+    const rect = commentTarget.getBoundingClientRect();
+
+    if (
+      rect.width <= 2 ||
+      rect.height <= 2 ||
+      rect.bottom < 0 ||
+      rect.right < 0 ||
+      rect.top > innerHeight ||
+      rect.left > innerWidth
+    ) {
+      commentButton.style.display = "none";
+      return;
+    }
+
+    commentButton.style.display = "inline-flex";
+    const buttonRect = commentButton.getBoundingClientRect();
+    const gap = 8;
+    let left = rect.right - buttonRect.width;
+    left = Math.max(8, Math.min(innerWidth - buttonRect.width - 8, left));
+
+    let top = rect.top - buttonRect.height - gap;
+    if (top < 8) {
+      top = Math.min(innerHeight - buttonRect.height - 8, rect.bottom + gap);
+    }
+
+    commentButton.style.left = left + "px";
+    commentButton.style.top = top + "px";
+  };
+
+  const showCommentButton = (target) => {
+    if (!isCommentableEditable(target)) return;
+
+    commentTarget = target;
+
+    if (!commentButton) {
+      commentButton = document.createElement("button");
+      commentButton.type = "button";
+      commentButton.dataset.autoFutureUi = "comment";
+      commentButton.textContent = "✦ Comentar";
+      commentButton.setAttribute("aria-label", "Comentar esta etapa da automação");
+      commentButton.style.cssText = [
+        "position:fixed",
+        "z-index:2147483647",
+        "display:inline-flex",
+        "align-items:center",
+        "justify-content:center",
+        "height:30px",
+        "padding:0 11px",
+        "border:1px solid rgba(133,104,190,.45)",
+        "border-radius:999px",
+        "background:rgba(39,39,42,.96)",
+        "color:#f5f1ff",
+        "box-shadow:0 10px 28px rgba(0,0,0,.25)",
+        "font:700 12px/1 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
+        "cursor:pointer",
+        "user-select:none"
+      ].join(";");
+
+      commentButton.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }, true);
+
+      commentButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (!commentTarget || !isEditable(commentTarget)) return;
+
+        send({
+          type: "editable-comment",
+          selector: selectorFor(commentTarget),
+          label: editableLabel(commentTarget),
+          placeholder: commentTarget.getAttribute("placeholder") || "",
+          inputType:
+            commentTarget instanceof HTMLInputElement
+              ? commentTarget.type || "text"
+              : commentTarget.tagName.toLowerCase(),
+          ...pointFor(commentTarget)
+        });
+      }, true);
+
+      document.documentElement.appendChild(commentButton);
+    }
+
+    positionCommentButton();
+  };
+
+  document.addEventListener("focusin", (event) => {
+    const target = eventTarget(event);
+    if (!target || !isCommentableEditable(target)) return;
+
+    showCommentButton(target);
+
+    send({
+      type: "editable-focus",
+      selector: selectorFor(target),
+      label: editableLabel(target),
+      placeholder: target.getAttribute("placeholder") || "",
+      inputType:
+        target instanceof HTMLInputElement
+          ? target.type || "text"
+          : target.tagName.toLowerCase(),
+      ...pointFor(target)
+    });
+  }, true);
+
+  window.addEventListener("scroll", positionCommentButton, true);
+  window.addEventListener("resize", positionCommentButton, true);
+
   let lastUrl = location.href;
 
   const reportNavigationIfChanged = () => {
@@ -313,10 +599,12 @@ export class BrowserRecorder {
   window.addEventListener("click", (event) => {
     const target = eventTarget(event);
     if (!target) return;
+    if (target.closest?.("[data-auto-future-ui]")) return;
 
     send({
       type: "click",
       selector: selectorFor(target),
+      ...semanticMeta(target),
       ...pointFor(target, event)
     });
 
@@ -339,6 +627,7 @@ export class BrowserRecorder {
     send({
       type: "key",
       selector: target ? selectorFor(target) : "",
+      ...semanticMeta(target),
       key: event.key,
       code: event.code,
       ctrlKey: event.ctrlKey,
@@ -352,16 +641,24 @@ export class BrowserRecorder {
   const inputTimers = new WeakMap();
 
   const reportInput = (target) => {
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+    if (!isEditable(target)) return;
 
     const pending = inputTimers.get(target);
     if (pending) window.clearTimeout(pending);
 
     const isSecret = target instanceof HTMLInputElement && target.type === "password";
+    const value =
+      target instanceof HTMLElement && target.isContentEditable
+        ? target.innerText
+        : "value" in target
+          ? target.value
+          : "";
+
     send({
       type: "input",
       selector: selectorFor(target),
-      value: isSecret ? "" : target.value,
+      ...semanticMeta(target),
+      value: isSecret ? "" : value,
       isSecret,
       ...pointFor(target)
     });
@@ -371,7 +668,7 @@ export class BrowserRecorder {
 
   document.addEventListener("input", (event) => {
     const target = eventTarget(event);
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+    if (!target || !isEditable(target)) return;
 
     const pending = inputTimers.get(target);
     if (pending) window.clearTimeout(pending);
@@ -496,6 +793,7 @@ export class BrowserRecorder {
     this.trackedPages.clear();
     this.lastRecordedUrlByPage.clear();
     this.domainIconPromise = null;
+    this.activeHybridDirectiveId = null;
 
     return finished;
   }
@@ -509,6 +807,420 @@ export class BrowserRecorder {
       browserName: this.browserName,
       firstUse: this.browserFirstUse,
     };
+  }
+
+  getCurrentRecording(): AutomationRecording | null {
+    return this.recording;
+  }
+
+  async focusBrowser(): Promise<void> {
+    if (this.recording) {
+      this.lastTimestamp = Date.now();
+    }
+
+    await this.page?.bringToFront().catch(() => undefined);
+  }
+
+  async captureHybridSnapshot(
+    field: EditableFieldInfo
+  ): Promise<HybridRecordingSnapshot> {
+    const page = this.page;
+
+    if (!page || page.isClosed()) {
+      throw new Error("A página da gravação não está mais disponível.");
+    }
+
+    const frame =
+      page
+        .frames()
+        .find((candidate) =>
+          field.frameUrl
+            ? candidate.url() === field.frameUrl
+            : field.frameName
+              ? candidate.name() === field.frameName
+              : false
+        ) || page.mainFrame();
+
+    return frame.evaluate(
+      ({ anchorSelector }) => {
+        const clean = (value: unknown, limit = 180) =>
+          String(value || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, limit);
+
+        const cssEscape = (value: string) => {
+          if (window.CSS && typeof window.CSS.escape === "function") {
+            return window.CSS.escape(value);
+          }
+
+          return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+        };
+
+        const quote = (value: string) =>
+          String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+        const safeCount = (selector: string) => {
+          try {
+            return document.querySelectorAll(selector).length;
+          } catch {
+            return 0;
+          }
+        };
+
+        const selectorFor = (element: Element | null): string => {
+          if (!element) return "";
+
+          const testId =
+            element.getAttribute("data-testid") ||
+            element.getAttribute("data-test");
+
+          if (testId) {
+            const attr = element.hasAttribute("data-testid")
+              ? "data-testid"
+              : "data-test";
+            const selector = "[" + attr + '="' + quote(testId) + '"]';
+            if (safeCount(selector) === 1) return selector;
+          }
+
+          if ((element as HTMLElement).id) {
+            const selector = "#" + cssEscape((element as HTMLElement).id);
+            if (safeCount(selector) === 1) return selector;
+          }
+
+          for (const attr of ["name", "aria-label", "placeholder", "title"]) {
+            const value = element.getAttribute(attr);
+            if (!value) continue;
+
+            const selector =
+              element.tagName.toLowerCase() +
+              "[" +
+              attr +
+              '="' +
+              quote(value) +
+              '"]';
+
+            if (safeCount(selector) === 1) return selector;
+          }
+
+          const parts: string[] = [];
+          let current: Element | null = element;
+
+          while (current && parts.length < 6) {
+            let part = current.tagName.toLowerCase();
+            const currentTagName = current.tagName;
+            const parent: HTMLElement | null = current.parentElement;
+
+            if (parent) {
+              const siblings: Element[] = Array.from(parent.children).filter(
+                (child: Element) => child.tagName === currentTagName
+              );
+
+              if (siblings.length > 1) {
+                part +=
+                  ":nth-of-type(" +
+                  (siblings.indexOf(current) + 1) +
+                  ")";
+              }
+            }
+
+            parts.unshift(part);
+            const candidate = parts.join(" > ");
+
+            if (safeCount(candidate) === 1) return candidate;
+            current = parent;
+          }
+
+          return parts.join(" > ");
+        };
+
+        const visible = (element: Element) => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+
+          return (
+            rect.width > 2 &&
+            rect.height > 2 &&
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < innerHeight &&
+            rect.left < innerWidth &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || 1) > 0.02
+          );
+        };
+
+        const describe = (element: Element) => {
+          const rect = element.getBoundingClientRect();
+          const tag = element.tagName.toLowerCase();
+
+          return {
+            selector: selectorFor(element),
+            tag,
+            role: clean(element.getAttribute("role"), 50),
+            text: clean(
+              tag === "input" || tag === "textarea"
+                ? element.getAttribute("aria-label") ||
+                    element.getAttribute("placeholder")
+                : (element as HTMLElement).innerText || element.textContent,
+              160
+            ),
+            ariaLabel: clean(element.getAttribute("aria-label"), 160),
+            placeholder: clean(element.getAttribute("placeholder"), 160),
+            title: clean(element.getAttribute("title"), 160),
+            href:
+              element instanceof HTMLAnchorElement
+                ? clean(element.href, 400)
+                : "",
+            disabled: Boolean(
+              (element as HTMLButtonElement).disabled ||
+                element.getAttribute("aria-disabled") === "true"
+            ),
+            rect: {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            },
+          };
+        };
+
+        let anchor: Element | null = null;
+
+        try {
+          anchor = anchorSelector
+            ? document.querySelector(anchorSelector)
+            : null;
+        } catch {
+          anchor = null;
+        }
+
+        const interactiveSelector = [
+          "button",
+          "a[href]",
+          "input",
+          "textarea",
+          "select",
+          "[contenteditable=true]",
+          "[role=button]",
+          "[role=link]",
+          "[role=menuitem]",
+          "[role=checkbox]",
+          "[role=radio]",
+          "[role=tab]",
+          "[role=option]",
+        ].join(",");
+
+        const elements = Array.from(
+          document.querySelectorAll(interactiveSelector)
+        )
+          .filter((element) => visible(element))
+          .slice(0, 90)
+          .map(describe);
+
+        const paginationWords =
+          /^(pr[oó]xim[ao]|next|seguinte|avan[cç]ar|mais|›|»|>|→)$/i;
+
+        const paginationCandidates = Array.from(
+          document.querySelectorAll(
+            "button,a[href],[role=button],[role=link]"
+          )
+        )
+          .filter((element) => visible(element))
+          .map((element) => {
+            const description = describe(element);
+            const semantic = clean(
+              [
+                description.text,
+                description.ariaLabel,
+                description.title,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              220
+            );
+
+            return {
+              ...description,
+              semantic,
+            };
+          })
+          .filter((item) => paginationWords.test(item.semantic))
+          .slice(0, 16);
+
+        const repeatedGroups: Array<Record<string, unknown>> = [];
+        const containers = Array.from(
+          document.querySelectorAll(
+            "ul,ol,tbody,[role=list],[role=grid],[role=table]"
+          )
+        );
+
+        for (const container of containers) {
+          if (repeatedGroups.length >= 12 || !visible(container)) continue;
+
+          const children = Array.from(container.children).filter(
+            (child) => visible(child)
+          );
+
+          if (children.length < 3) continue;
+
+          const signatures = new Map<
+            string,
+            { count: number; items: Element[] }
+          >();
+
+          for (const child of children) {
+            const className =
+              child instanceof HTMLElement
+                ? Array.from(child.classList)
+                    .filter((name) => name.length < 50)
+                    .slice(0, 3)
+                    .sort()
+                    .join(".")
+                : "";
+            const signature =
+              child.tagName.toLowerCase() +
+              (className ? "." + className : "");
+
+            const current = signatures.get(signature) || {
+              count: 0,
+              items: [],
+            };
+
+            current.count += 1;
+            if (current.items.length < 4) current.items.push(child);
+            signatures.set(signature, current);
+          }
+
+          const dominant = [...signatures.entries()].sort(
+            (a, b) => b[1].count - a[1].count
+          )[0];
+
+          if (!dominant || dominant[1].count < 3) continue;
+
+          const sampleItems = dominant[1].items;
+          const firstLink = sampleItems
+            .flatMap((item) => Array.from(item.querySelectorAll("a[href]")))
+            .find((link) => visible(link));
+
+          repeatedGroups.push({
+            containerSelector: selectorFor(container),
+            itemSignature: dominant[0],
+            itemCount: dominant[1].count,
+            sampleTexts: sampleItems.map((item) =>
+              clean((item as HTMLElement).innerText || item.textContent, 220)
+            ),
+            itemLinkSelector: selectorFor(firstLink || null),
+          });
+        }
+
+        return {
+          url: location.href,
+          title: document.title,
+          text: clean(document.body?.innerText, 5000),
+          anchor: anchor ? describe(anchor) : undefined,
+          elements,
+          paginationCandidates,
+          repeatedGroups,
+        };
+      },
+      {
+        anchorSelector: field.selector,
+      }
+    );
+  }
+
+  applyHybridDirective(
+    directive: AutomationHybridDirective
+  ): AutomationHybridDirective {
+    if (!this.recording) {
+      throw new Error("Não existe uma gravação em andamento.");
+    }
+
+    const actions = this.recording.actions;
+    let anchorIndex = -1;
+
+    for (let index = actions.length - 1; index >= 0; index -= 1) {
+      const action = actions[index];
+
+      if (
+        action.type === "input" &&
+        action.selector === directive.anchorSelector
+      ) {
+        anchorIndex = index;
+        break;
+      }
+    }
+
+    if (anchorIndex >= 0) {
+      const anchor = actions[anchorIndex];
+      anchor.hybridDirectiveId = directive.id;
+      directive.anchorActionId = anchor.id;
+      directive.startActionIndex = anchorIndex;
+
+      if (directive.inputPlan?.mode === "sequence") {
+        const values = (directive.inputPlan.values || [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean);
+
+        if (values.length) {
+          anchor.dynamicValueSequence = values;
+          anchor.dynamicValuePrompt = undefined;
+          anchor.dynamicValueContext = directive.runtimeObjective;
+
+          if ((this.recording.loopCount || 1) <= 1 && values.length > 1) {
+            this.recording.loopCount = Math.min(99, values.length);
+          }
+        }
+      } else if (
+        directive.inputPlan?.mode === "ai" &&
+        directive.inputPlan.prompt
+      ) {
+        anchor.dynamicValuePrompt = directive.inputPlan.prompt;
+        anchor.dynamicValueContext = directive.runtimeObjective;
+        anchor.dynamicValueSequence = undefined;
+      }
+    } else {
+      directive.startActionIndex = actions.length;
+    }
+
+    const consumesFollowing = directive.consumeFollowingActions === true;
+    const fromIndex = Math.max(0, directive.startActionIndex || 0);
+    const demonstrationActionIds: string[] = [];
+
+    if (anchorIndex >= 0 && !consumesFollowing) {
+      const anchor = actions[anchorIndex];
+      anchor.hybridDirectiveId = directive.id;
+      demonstrationActionIds.push(anchor.id);
+    } else if (consumesFollowing) {
+      for (let index = fromIndex; index < actions.length; index += 1) {
+        actions[index].hybridDirectiveId = directive.id;
+        demonstrationActionIds.push(actions[index].id);
+      }
+    }
+
+    directive.demonstrationActionIds = demonstrationActionIds;
+    directive.updatedAt = new Date().toISOString();
+
+    const directives = this.recording.hybridDirectives || [];
+    const existingIndex = directives.findIndex(
+      (item) => item.id === directive.id
+    );
+
+    if (existingIndex >= 0) {
+      directives[existingIndex] = directive;
+    } else {
+      directives.push(directive);
+    }
+
+    this.recording.hybridDirectives = directives;
+    this.activeHybridDirectiveId =
+      anchorIndex >= 0 && !consumesFollowing
+        ? null
+        : directive.id;
+
+    return directive;
   }
 
   private registerPage(page: Page): void {
@@ -890,7 +1602,7 @@ export class BrowserRecorder {
       Partial<
         Pick<
           AutomationAction,
-          "selector" | "value" | "isSecret" | "key" | "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "frameUrl" | "frameName" | "pageId" | "x" | "y"
+          "selector" | "targetText" | "targetAriaLabel" | "targetRole" | "targetTitle" | "value" | "isSecret" | "key" | "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "frameUrl" | "frameName" | "pageId" | "x" | "y"
         >
       >
   ): void {
@@ -908,6 +1620,10 @@ export class BrowserRecorder {
       now - previous.timestamp <= 2000
     ) {
       previous.value = partial.value;
+      previous.targetText = partial.targetText;
+      previous.targetAriaLabel = partial.targetAriaLabel;
+      previous.targetRole = partial.targetRole;
+      previous.targetTitle = partial.targetTitle;
       previous.isSecret = partial.isSecret;
       previous.url = partial.url;
       previous.timestamp = now;
@@ -924,6 +1640,10 @@ export class BrowserRecorder {
       delayMs: Math.max(0, now - this.lastTimestamp),
       url: partial.url,
       selector: partial.selector,
+      targetText: partial.targetText,
+      targetAriaLabel: partial.targetAriaLabel,
+      targetRole: partial.targetRole,
+      targetTitle: partial.targetTitle,
       value: partial.value,
       isSecret: partial.isSecret,
       key: partial.key,
@@ -937,7 +1657,66 @@ export class BrowserRecorder {
       pageId: partial.pageId,
       x: partial.x,
       y: partial.y,
+      hybridDirectiveId: undefined,
     };
+
+    if (this.activeHybridDirectiveId) {
+      const directive = (this.recording.hybridDirectives || []).find(
+        (item) => item.id === this.activeHybridDirectiveId
+      );
+
+      if (directive) {
+        const isAnchorAction =
+          action.type === "input" &&
+          action.selector === directive.anchorSelector;
+        const shouldTagAction =
+          directive.consumeFollowingActions === true || isAnchorAction;
+
+        if (shouldTagAction) {
+          action.hybridDirectiveId = directive.id;
+
+          const demonstrationActionIds =
+            directive.demonstrationActionIds || [];
+
+          if (!demonstrationActionIds.includes(action.id)) {
+            demonstrationActionIds.push(action.id);
+          }
+
+          directive.demonstrationActionIds = demonstrationActionIds;
+        }
+
+        if (!directive.anchorActionId && isAnchorAction) {
+          directive.anchorActionId = action.id;
+          directive.startActionIndex = this.recording.actions.length;
+
+          if (directive.inputPlan?.mode === "sequence") {
+            const values = (directive.inputPlan.values || [])
+              .map((value) => String(value || "").trim())
+              .filter(Boolean);
+
+            if (values.length) {
+              action.dynamicValueSequence = values;
+              action.dynamicValueContext = directive.runtimeObjective;
+              if ((this.recording.loopCount || 1) <= 1 && values.length > 1) {
+                this.recording.loopCount = Math.min(99, values.length);
+              }
+            }
+          } else if (
+            directive.inputPlan?.mode === "ai" &&
+            directive.inputPlan.prompt
+          ) {
+            action.dynamicValuePrompt = directive.inputPlan.prompt;
+            action.dynamicValueContext = directive.runtimeObjective;
+          }
+
+          if (directive.consumeFollowingActions !== true) {
+            this.activeHybridDirectiveId = null;
+          }
+        }
+
+        directive.updatedAt = new Date().toISOString();
+      }
+    }
 
     this.lastTimestamp = now;
     this.recording.actions.push(action);
