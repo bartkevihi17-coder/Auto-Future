@@ -50,6 +50,7 @@ export interface AutomationRecording {
   executionSpeed?: ExecutionSpeed;
   optimizationEnabled?: boolean;
   notificationsEnabled?: boolean;
+  loopCount?: number;
   folderId?: string;
   tags?: AutomationTag[];
 }

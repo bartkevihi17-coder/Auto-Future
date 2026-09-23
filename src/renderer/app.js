@@ -128,6 +128,7 @@ const executionCometPaths = [...document.querySelectorAll("#execution-dial-comet
 const editorSpeedSection = document.querySelector("#editor-speed-section");
 const executionSpeedSection = document.querySelector("#execution-speed-section");
 const editorNotificationToggle = document.querySelector("#editor-notification-toggle");
+const editorLoopCount = document.querySelector("#editor-loop-count");
 
 const notificationBell = document.querySelector("#notification-bell");
 const notificationBellGlyph = document.querySelector("#notification-bell-glyph");
@@ -1886,6 +1887,95 @@ async function snapshotAiBrowser() {
         );
       };
 
+      const cssEscape = (value) => {
+        if (window.CSS && typeof window.CSS.escape === "function") {
+          return window.CSS.escape(String(value));
+        }
+
+        return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+      };
+
+      const quoteAttr = (value) =>
+        String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+      const selectorFor = (element) => {
+        const testId =
+          element.getAttribute("data-testid") ||
+          element.getAttribute("data-test");
+
+        if (testId) {
+          const attr = element.hasAttribute("data-testid")
+            ? "data-testid"
+            : "data-test";
+          return "[" + attr + '="' + quoteAttr(testId) + '"]';
+        }
+
+        if (element.id) {
+          const byId = "#" + cssEscape(element.id);
+          if (document.querySelectorAll(byId).length === 1) return byId;
+        }
+
+        const name = element.getAttribute("name");
+        if (name) {
+          const byName =
+            element.tagName.toLowerCase() +
+            '[name="' +
+            quoteAttr(name) +
+            '"]';
+          if (document.querySelectorAll(byName).length === 1) return byName;
+        }
+
+        const aria = element.getAttribute("aria-label");
+        if (aria) {
+          const byAria = '[aria-label="' + quoteAttr(aria) + '"]';
+          if (document.querySelectorAll(byAria).length === 1) return byAria;
+        }
+
+        const placeholder = element.getAttribute("placeholder");
+        if (placeholder) {
+          const byPlaceholder =
+            element.tagName.toLowerCase() +
+            '[placeholder="' +
+            quoteAttr(placeholder) +
+            '"]';
+          if (document.querySelectorAll(byPlaceholder).length === 1) {
+            return byPlaceholder;
+          }
+        }
+
+        const parts = [];
+        let current = element;
+
+        while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 6) {
+          let part = current.tagName.toLowerCase();
+          const parent = current.parentElement;
+
+          if (parent) {
+            const siblings = Array.from(parent.children).filter(
+              (child) => child.tagName === current.tagName
+            );
+
+            if (siblings.length > 1) {
+              part +=
+                ":nth-of-type(" +
+                (siblings.indexOf(current) + 1) +
+                ")";
+            }
+          }
+
+          parts.unshift(part);
+          const candidate = parts.join(" > ");
+
+          if (document.querySelectorAll(candidate).length === 1) {
+            return candidate;
+          }
+
+          current = parent;
+        }
+
+        return parts.join(" > ");
+      };
+
       document.querySelectorAll("[data-af-ai-id]").forEach((el) => {
         delete el.dataset.afAiId;
       });
@@ -1942,6 +2032,7 @@ async function snapshotAiBrowser() {
           title,
           href,
           inputType,
+          selector: selectorFor(el),
           disabled: Boolean(el.disabled || el.getAttribute("aria-disabled") === "true"),
           checked:
             typeof el.checked === "boolean"
@@ -2275,6 +2366,8 @@ async function requestAiAgentProposal(manualNote = "", retryCount = 0) {
       throw new Error("A IA não retornou uma próxima ação.");
     }
 
+    proposal._pageUrl = snapshot?.url || null;
+
     if (proposal.targetId && Array.isArray(snapshot?.elements)) {
       proposal._targetSnapshot =
         snapshot.elements.find((element) => element.id === proposal.targetId) || null;
@@ -2589,6 +2682,86 @@ async function undoAiAgentLastAction() {
   }
 }
 
+function buildAiRecordingSteps() {
+  const steps = [];
+
+  for (const event of aiAgentContextEvents) {
+    if (event.type === "approved" && event.proposal) {
+      const proposal = event.proposal;
+
+      if (proposal.action === "wait") continue;
+
+      if (proposal.action === "navigate") {
+        if (proposal.url) {
+          steps.push({
+            action: "navigate",
+            url: proposal.url,
+            pageUrl: event.pageUrlBefore || event.pageUrl || null,
+          });
+        }
+        continue;
+      }
+
+      const target = event.targetSnapshot || null;
+      const rect = target?.rect || null;
+
+      steps.push({
+        action: proposal.action,
+        selector: target?.selector || "",
+        value: proposal.value || "",
+        key: proposal.key || "",
+        pageUrl:
+          event.pageUrlBefore ||
+          event.pageUrl ||
+          target?.href ||
+          aiAgentAction?.startUrl ||
+          "",
+        x: rect ? Math.round(rect.x + rect.width / 2) : undefined,
+        y: rect ? Math.round(rect.y + rect.height / 2) : undefined,
+      });
+      continue;
+    }
+
+    if (
+      event.type === "undo" &&
+      event.proposal?.action !== "wait" &&
+      steps.length
+    ) {
+      steps.pop();
+    }
+  }
+
+  return steps;
+}
+
+async function promoteAiActionToEditor() {
+  if (!aiAgentAction) {
+    throw new Error("A ação de IA não está mais disponível.");
+  }
+
+  const actionId = aiAgentAction.id;
+  const steps = buildAiRecordingSteps();
+
+  setAiAgentStatus("Salvando automação no Editor...", "working");
+
+  const result = await ipcRenderer.invoke("ai:action:promote-to-recording", {
+    actionId,
+    steps,
+  });
+
+  if (!result?.recording) {
+    throw new Error("A automação foi concluída, mas não consegui criá-la no Editor.");
+  }
+
+  const recording = result.recording;
+
+  await closeAiAgent();
+  await refreshRecordings();
+  loadEditor(recording);
+  openPage("editor");
+  setStatus("Automação da IA adicionada ao Editor", "success");
+}
+
 async function executeAiAgentProposal() {
   const proposal = aiAgentProposalState;
 
@@ -2597,9 +2770,27 @@ async function executeAiAgentProposal() {
   const executionActionId = aiAgentAction.id;
 
   if (proposal.status === "done") {
-    setAiAgentStatus("Execução finalizada", "success");
-    aiAgentProposal.classList.add("is-hidden");
-    await clearAiTargetBubble();
+    aiAgentApprove.disabled = true;
+    aiAgentReject.disabled = true;
+    aiAgentManual.disabled = true;
+    aiAgentUndo.disabled = true;
+
+    try {
+      await clearAiTargetBubble();
+      await promoteAiActionToEditor();
+    } catch (error) {
+      setAiAgentStatus("Concluiu, mas não salvou no Editor", "error");
+      aiAgentProposal.classList.remove("is-hidden");
+      aiAgentProposalLabel.textContent = "Não consegui adicionar ao Editor";
+      aiAgentProposalDetail.textContent = error?.message || String(error);
+      aiAgentApprove.textContent = "Tentar salvar";
+    } finally {
+      aiAgentApprove.disabled = false;
+      aiAgentReject.disabled = false;
+      aiAgentManual.disabled = false;
+      syncAiUndoButton();
+    }
+
     return;
   }
 
@@ -2754,6 +2945,8 @@ async function executeAiAgentProposal() {
     }
 
     pushAiAgentContextEvent("approved", proposal, {
+      pageUrlBefore: proposal._pageUrl || null,
+      targetSnapshot: proposal._targetSnapshot || null,
       resultingUrl:
         aiAgentBrowser.getURL?.() ||
         aiBrowserUrl.textContent ||
@@ -4175,6 +4368,12 @@ function normalizeSpeed(value) {
   return 1;
 }
 
+function normalizeLoopCount(value) {
+  const numeric = Math.trunc(Number(value));
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.min(99, Math.max(1, numeric));
+}
+
 function speedLabel(speed) {
   const normalized = normalizeSpeed(speed);
   return normalized === 1 ? "1x" : normalized.toFixed(1) + "x";
@@ -4358,11 +4557,14 @@ function refreshExecutionMeta() {
 
   const actions = currentRecording.actions || [];
   const optimized = currentRecording.optimizationEnabled !== false;
+  const loopCount = normalizeLoopCount(currentRecording.loopCount);
+  const loopLabel = loopCount > 1 ? " · loop " + loopCount + "x" : "";
 
   if (optimized) {
     executionMeta.textContent =
       actions.length +
-      " ações · otimização ativa · executa conforme cada alvo fica pronto";
+      " ações · otimização ativa · executa conforme cada alvo fica pronto" +
+      loopLabel;
     return;
   }
 
@@ -4373,7 +4575,8 @@ function refreshExecutionMeta() {
   executionMeta.textContent =
     actions.length + " ações · " +
     formatSeconds(recordedMs / speed) +
-    " estimados em " + speedLabel(speed);
+    " estimados em " + speedLabel(speed) +
+    loopLabel;
 }
 
 function renderOptimizationState() {
@@ -4682,6 +4885,7 @@ function loadEditor(recording) {
     executionSpeed: normalizeSpeed(recording.executionSpeed),
     optimizationEnabled: recording.optimizationEnabled !== false,
     notificationsEnabled: recording.notificationsEnabled === true,
+    loopCount: normalizeLoopCount(recording.loopCount),
   };
   selectedActionId = currentRecording.actions?.[0]?.id || null;
   timelineZoom = 1;
@@ -4699,6 +4903,7 @@ function loadEditor(recording) {
     editorNotificationToggle,
     currentRecording.notificationsEnabled
   );
+  editorLoopCount.value = String(normalizeLoopCount(currentRecording.loopCount));
 
   const editorSchedules = savedSchedules.filter(
     (schedule) => schedule.automationId === currentRecording.id
@@ -4848,6 +5053,7 @@ function prepareExecution(recording) {
     executionSpeed: speed,
     optimizationEnabled: recording?.optimizationEnabled !== false,
     notificationsEnabled: recording?.notificationsEnabled === true,
+    loopCount: normalizeLoopCount(recording?.loopCount),
   };
 
   executionTitle.textContent = currentRecording?.name || "Automação pronta";
@@ -4863,10 +5069,13 @@ function prepareExecution(recording) {
   executionStartButton.disabled = actions.length === 0;
   executionDialValue = 0;
   executionDialTargetValue = 0;
+  const loopCount = normalizeLoopCount(currentRecording.loopCount);
+
   setExecutionProgress(
     0,
     "Pronta para executar",
-    "0 de " + actions.length + " ações"
+    "0 de " + actions.length + " ações" +
+      (loopCount > 1 ? " · loop 1 de " + loopCount : "")
   );
 }
 
@@ -4882,19 +5091,31 @@ ipcRenderer.on("execution:progress", (_event, progress) => {
   const total = Number(progress.total) || 0;
   const index = Number(progress.index) || 0;
   const percent = Number(progress.percent) || 0;
+  const loopIndex = Math.max(1, Number(progress.loopIndex) || 1);
+  const loopTotal = Math.max(1, Number(progress.loopTotal) || 1);
+  const loopText = loopTotal > 1
+    ? " · loop " + loopIndex + " de " + loopTotal
+    : "";
 
   if (progress.phase === "completed" && percent >= 100) {
-    setExecutionProgress(100, "Execução concluída", total + " de " + total + " ações");
+    setExecutionProgress(
+      100,
+      "Execução concluída",
+      total + " de " + total + " ações" + loopText
+    );
     return;
   }
 
-  const currentNumber = Math.min(total, Math.max(1, index + (progress.phase === "starting" ? 1 : 0)));
+  const currentNumber = Math.min(
+    total,
+    Math.max(1, index + (progress.phase === "starting" ? 1 : 0))
+  );
   const verb = progress.phase === "starting" ? "Executando" : "Concluída";
 
   setExecutionProgress(
     percent,
     verb + " " + executionActionLabel(progress.type),
-    currentNumber + " de " + total + " ações"
+    currentNumber + " de " + total + " ações" + loopText
   );
 });
 
@@ -5702,6 +5923,7 @@ saveEditorButton.addEventListener("click", async () => {
       executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
       optimizationEnabled: currentRecording.optimizationEnabled !== false,
       notificationsEnabled: currentRecording.notificationsEnabled === true,
+      loopCount: normalizeLoopCount(currentRecording.loopCount),
     });
 
     currentRecording = result.recording;
@@ -5723,10 +5945,15 @@ executionStartButton.addEventListener("click", async () => {
 
   executionStartButton.disabled = true;
   executionStartButton.textContent = "Executando...";
+  const executionLoopCount = normalizeLoopCount(currentRecording.loopCount);
+
   setExecutionProgress(
     0,
     "Iniciando automação",
-    "0 de " + currentRecording.actions.length + " ações"
+    "0 de " + currentRecording.actions.length + " ações" +
+      (executionLoopCount > 1
+        ? " · loop 1 de " + executionLoopCount
+        : "")
   );
   setStatus("Executando", "working");
 
@@ -5736,6 +5963,7 @@ executionStartButton.addEventListener("click", async () => {
       executionSpeed: normalizeSpeed(currentRecording.executionSpeed),
       optimizationEnabled: currentRecording.optimizationEnabled !== false,
       notificationsEnabled: currentRecording.notificationsEnabled === true,
+      loopCount: normalizeLoopCount(currentRecording.loopCount),
     });
     currentRecording = updated.recording;
 
@@ -5746,7 +5974,13 @@ executionStartButton.addEventListener("click", async () => {
     setExecutionProgress(
       100,
       "Execução concluída",
-      currentRecording.actions.length + " de " + currentRecording.actions.length + " ações"
+      currentRecording.actions.length +
+        " de " +
+        currentRecording.actions.length +
+        " ações" +
+        (executionLoopCount > 1
+          ? " · loop " + executionLoopCount + " de " + executionLoopCount
+          : "")
     );
     setStatus("Execução concluída", "success");
   } catch (error) {
@@ -6082,6 +6316,43 @@ editorNotificationToggle.addEventListener("click", () => {
     editorNotificationToggle,
     currentRecording.notificationsEnabled !== true
   );
+});
+
+editorLoopCount.addEventListener("input", () => {
+  if (!currentRecording) return;
+
+  const raw = editorLoopCount.value.trim();
+  if (!raw) return;
+
+  const next = normalizeLoopCount(raw);
+  currentRecording.loopCount = next;
+  refreshExecutionMeta();
+});
+
+editorLoopCount.addEventListener("change", async () => {
+  if (!currentRecording) return;
+
+  const next = normalizeLoopCount(editorLoopCount.value);
+  editorLoopCount.value = String(next);
+  currentRecording.loopCount = next;
+  refreshExecutionMeta();
+
+  try {
+    await ipcRenderer.invoke("recording:update-loop", next);
+    await refreshRecordings();
+    setStatus(
+      next > 1 ? "Loop configurado para " + next + " execuções" : "Loop desativado",
+      "success"
+    );
+  } catch (error) {
+    setStatus("Erro ao salvar loop", "error");
+    openNoticeModal({
+      eyebrow: "LOOP",
+      title: "Não foi possível salvar",
+      description: error?.message || String(error),
+      confirmLabel: "Entendi",
+    });
+  }
 });
 
 editorOptimizationButton.addEventListener("click", openOptimizationModal);

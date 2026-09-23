@@ -175,6 +175,12 @@ function normalizeExecutionSpeed(value: unknown): ExecutionSpeed {
   return 1;
 }
 
+function normalizeLoopCount(value: unknown): number {
+  const numeric = Math.trunc(Number(value));
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.min(99, Math.max(1, numeric));
+}
+
 function normalizeOptimization(value: unknown): boolean {
   return value !== false;
 }
@@ -198,7 +204,9 @@ interface AiRegisteredAction {
   startUrl?: string;
   domain?: string;
   status: "ready";
+  recordingId?: string;
   createdAt: string;
+  updatedAt?: string;
   model: string;
   provider: "groq";
 }
@@ -503,6 +511,7 @@ function withVideoUrl(recording: AutomationRecording) {
     executionSpeed: normalizeExecutionSpeed(recording.executionSpeed),
     optimizationEnabled: normalizeOptimization(recording.optimizationEnabled),
     notificationsEnabled: normalizeNotifications(recording.notificationsEnabled),
+    loopCount: normalizeLoopCount(recording.loopCount),
     domainIconUrl: recording.domainIconPath
       ? pathToFileURL(recording.domainIconPath).href
       : null,
@@ -526,6 +535,7 @@ async function persistRecording(recording: AutomationRecording): Promise<string>
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
   recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
   recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
+  recording.loopCount = normalizeLoopCount(recording.loopCount);
   recording.tags = normalizeTags(recording.tags);
 
   const filePath = path.join(dir, recording.id + ".json");
@@ -540,6 +550,7 @@ async function loadRecordingById(id: string): Promise<AutomationRecording> {
   recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
   recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
   recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
+  recording.loopCount = normalizeLoopCount(recording.loopCount);
   recording.tags = normalizeTags(recording.tags);
   return recording;
 }
@@ -559,6 +570,7 @@ async function listRecordings(): Promise<AutomationRecording[]> {
       recording.executionSpeed = normalizeExecutionSpeed(recording.executionSpeed);
       recording.optimizationEnabled = normalizeOptimization(recording.optimizationEnabled);
       recording.notificationsEnabled = normalizeNotifications(recording.notificationsEnabled);
+      recording.loopCount = normalizeLoopCount(recording.loopCount);
       recording.tags = normalizeTags(recording.tags);
       recordings.push(recording);
     } catch {
@@ -788,12 +800,27 @@ async function executeRecording(
   await appendRun(run);
 
   try {
-    await runRecording(
-      recording,
-      browserProfileDir(),
-      { headless: !visible },
-      onProgress
-    );
+    const loopTotal = normalizeLoopCount(recording.loopCount);
+
+    for (let loopIndex = 1; loopIndex <= loopTotal; loopIndex += 1) {
+      await runRecording(
+        recording,
+        browserProfileDir(),
+        { headless: !visible },
+        (progress) => {
+          const overallPercent = Math.round(
+            (((loopIndex - 1) + progress.percent / 100) / loopTotal) * 100
+          );
+
+          onProgress?.({
+            ...progress,
+            percent: overallPercent,
+            loopIndex,
+            loopTotal,
+          });
+        }
+      );
+    }
 
     run.status = "success";
     run.finishedAt = new Date().toISOString();
@@ -1007,6 +1034,175 @@ app.whenReady().then(async () => {
       ok: true,
     };
   });
+
+  ipcMain.handle(
+    "ai:action:promote-to-recording",
+    async (
+      _event,
+      payload: {
+        actionId?: string;
+        steps?: Array<{
+          action?: string;
+          selector?: string;
+          value?: string;
+          key?: string;
+          url?: string;
+          pageUrl?: string;
+          x?: number;
+          y?: number;
+        }>;
+      }
+    ) => {
+      const actionId = String(payload?.actionId || "").trim();
+
+      if (!actionId) {
+        throw new Error("A ação de IA não possui identificador.");
+      }
+
+      const aiActions = await readAiActions();
+      const aiAction = aiActions.find((item) => item.id === actionId);
+
+      if (!aiAction) {
+        throw new Error("Não encontrei a ação de IA para salvar no Editor.");
+      }
+
+      if (aiAction.recordingId) {
+        try {
+          const existing = await loadRecordingById(aiAction.recordingId);
+          lastRecording = existing;
+          return {
+            ok: true,
+            recording: withVideoUrl(existing),
+            reused: true,
+          };
+        } catch {
+          aiAction.recordingId = undefined;
+        }
+      }
+
+      const initialUrl = normalizeAiActionUrl(aiAction.startUrl);
+
+      if (!initialUrl) {
+        throw new Error("A ação de IA não possui uma URL inicial válida.");
+      }
+
+      const existingRecordings = await listRecordings();
+      const baseName = normalizeAiActionName(aiAction.name, aiAction.instruction);
+      const occupied = new Set(
+        existingRecordings.map((recording) =>
+          String(recording.name || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLocaleLowerCase("pt-BR")
+        )
+      );
+
+      let name = baseName;
+      let suffix = 2;
+
+      while (
+        occupied.has(
+          name.replace(/\s+/g, " ").trim().toLocaleLowerCase("pt-BR")
+        )
+      ) {
+        name = (baseName + " (IA " + suffix + ")").slice(0, 72);
+        suffix += 1;
+      }
+
+      const rawSteps = Array.isArray(payload?.steps) ? payload.steps : [];
+      const actions: AutomationAction[] = [];
+      let timestamp = 0;
+
+      for (const step of rawSteps.slice(0, 500)) {
+        const type = String(step?.action || "").trim();
+
+        if (
+          type !== "click" &&
+          type !== "input" &&
+          type !== "key" &&
+          type !== "navigate"
+        ) {
+          continue;
+        }
+
+        timestamp += 650;
+
+        if (type === "navigate") {
+          const url = normalizeAiActionUrl(step.url);
+          if (!url) continue;
+
+          actions.push({
+            id: randomUUID(),
+            type: "navigate",
+            timestamp,
+            delayMs: 650,
+            url,
+            pageId: "p1",
+          });
+          continue;
+        }
+
+        const selector = String(step.selector || "").trim();
+        const x = Number(step.x);
+        const y = Number(step.y);
+
+        if (
+          !selector &&
+          (!Number.isFinite(x) || !Number.isFinite(y))
+        ) {
+          continue;
+        }
+
+        const pageUrl =
+          normalizeAiActionUrl(step.pageUrl) ||
+          initialUrl;
+
+        actions.push({
+          id: randomUUID(),
+          type: type as "click" | "input" | "key",
+          timestamp,
+          delayMs: 650,
+          url: pageUrl,
+          selector: selector || undefined,
+          value: type === "input" ? String(step.value || "") : undefined,
+          key: type === "key" ? String(step.key || "Enter") : undefined,
+          x: Number.isFinite(x) ? x : undefined,
+          y: Number.isFinite(y) ? y : undefined,
+          pageId: "p1",
+        });
+      }
+
+      const now = new Date().toISOString();
+      const recording: AutomationRecording = {
+        id: randomUUID(),
+        name,
+        initialUrl,
+        createdAt: now,
+        updatedAt: now,
+        actions,
+        executionSpeed: 1,
+        optimizationEnabled: true,
+        notificationsEnabled: false,
+        loopCount: 1,
+        tags: [],
+      };
+
+      await persistRecording(recording);
+      lastRecording = recording;
+
+      aiAction.recordingId = recording.id;
+      aiAction.updatedAt = now;
+      await writeAiActions(aiActions);
+
+      mainWindow?.webContents.send("recordings:changed");
+
+      return {
+        ok: true,
+        recording: withVideoUrl(recording),
+        reused: false,
+      };
+    }
+  );
 
   ipcMain.handle(
     "ai:action:register",
@@ -1578,6 +1774,7 @@ app.whenReady().then(async () => {
         executionSpeed?: ExecutionSpeed;
         optimizationEnabled?: boolean;
         notificationsEnabled?: boolean;
+        loopCount?: number;
       }
     ) => {
       if (!lastRecording) {
@@ -1593,6 +1790,9 @@ app.whenReady().then(async () => {
       );
       lastRecording.notificationsEnabled = normalizeNotifications(
         payload.notificationsEnabled ?? lastRecording.notificationsEnabled
+      );
+      lastRecording.loopCount = normalizeLoopCount(
+        payload.loopCount ?? lastRecording.loopCount
       );
 
       await persistRecording(lastRecording);
@@ -1657,6 +1857,24 @@ app.whenReady().then(async () => {
       return {
         ok: true,
         recording: withVideoUrl(recording),
+      };
+    }
+  );
+
+  ipcMain.handle(
+    "recording:update-loop",
+    async (_event, loopCount?: number) => {
+      if (!lastRecording) {
+        throw new Error("Nenhuma gravacao carregada.");
+      }
+
+      lastRecording.loopCount = normalizeLoopCount(loopCount);
+      await persistRecording(lastRecording);
+      mainWindow?.webContents.send("recordings:changed");
+
+      return {
+        ok: true,
+        loopCount: lastRecording.loopCount,
       };
     }
   );

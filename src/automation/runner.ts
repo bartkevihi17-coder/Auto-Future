@@ -8,6 +8,8 @@ export interface RunProgressEvent {
   percent: number;
   type?: AutomationActionType;
   phase: "starting" | "completed";
+  loopIndex?: number;
+  loopTotal?: number;
 }
 
 type ProgressSink = (event: RunProgressEvent) => void;

@@ -6488,3 +6488,67 @@ body.logged-in .background-tint {
     flex-wrap: wrap;
   }
 }
+
+
+/* ===== Automation loop control ===== */
+
+.automation-loop-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid #e5dfea;
+  border-radius: 12px;
+  padding: 10px 11px;
+  background: #fbf9fc;
+}
+
+.automation-loop-control > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.automation-loop-control strong {
+  color: #332b39;
+  font-size: 10px;
+}
+
+.automation-loop-control > div > span {
+  color: #8c8391;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.automation-loop-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #ddd6e3;
+  border-radius: 9px;
+  padding: 3px 7px 3px 5px;
+  color: #776d7e;
+  background: #ffffff;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.automation-loop-input input {
+  width: 46px;
+  height: 27px;
+  border: 0;
+  padding: 0 4px;
+  color: #392f42;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+  text-align: center;
+  outline: none;
+}
+
+.automation-loop-input input::-webkit-inner-spin-button,
+.automation-loop-input input::-webkit-outer-spin-button {
+  opacity: 1;
+}

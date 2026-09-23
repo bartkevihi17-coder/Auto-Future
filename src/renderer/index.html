@@ -331,6 +331,18 @@
                 <span class="optimization-toggle__state">Ativada</span>
               </button>
 
+              <section class="automation-loop-control">
+                <div>
+                  <p class="eyebrow">LOOP</p>
+                  <strong>Repetir execução</strong>
+                  <span>Ao terminar, inicia novamente até completar a quantidade definida.</span>
+                </div>
+                <label class="automation-loop-input">
+                  <input id="editor-loop-count" type="number" min="1" max="99" step="1" value="1" inputmode="numeric" aria-label="Quantidade de execuções em loop" />
+                  <span>vezes</span>
+                </label>
+              </section>
+
               <button id="editor-notification-toggle" class="bell-toggle automation-notification-toggle" type="button" aria-pressed="false">
                 <span class="bell-toggle__bell" aria-hidden="true">
                   <span class="bell-toggle__glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5V10a6 6 0 0 1 12 0v6.5l1.6 2.3H4.4L6 16.5z"></path><path d="M12 2.5V4"></path></svg></span>
