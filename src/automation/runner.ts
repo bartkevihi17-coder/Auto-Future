@@ -13,6 +13,7 @@ export interface RunProgressEvent {
 }
 
 type ProgressSink = (event: RunProgressEvent) => void;
+type DynamicValueResolver = (action: AutomationAction) => Promise<string>;
 
 function comparableUrl(value?: string): string {
   if (!value) return "";
@@ -255,16 +256,24 @@ async function keyAction(page: Page, action: AutomationAction): Promise<void> {
   await page.keyboard.press(parts.join("+"));
 }
 
-async function inputAction(page: Page, action: AutomationAction): Promise<void> {
+async function inputAction(
+  page: Page,
+  action: AutomationAction,
+  resolveDynamicValue?: DynamicValueResolver
+): Promise<void> {
   const frame = resolveActionFrame(page, action);
   let selectorError: unknown = null;
+  const resolvedValue =
+    action.dynamicValuePrompt && resolveDynamicValue
+      ? await resolveDynamicValue(action)
+      : action.value ?? "";
 
   if (action.selector) {
     try {
       const locator = await findVisibleLocator(frame, action.selector, 8_000);
 
       if (locator) {
-        await locator.fill(action.value ?? "");
+        await locator.fill(resolvedValue);
         return;
       }
 
@@ -281,7 +290,7 @@ async function inputAction(page: Page, action: AutomationAction): Promise<void> 
   if (point) {
     await page.mouse.click(point.x, point.y);
     await page.keyboard.press("Control+A");
-    await page.keyboard.insertText(action.value ?? "");
+    await page.keyboard.insertText(resolvedValue);
     return;
   }
 
@@ -293,7 +302,8 @@ export async function runRecording(
   recording: AutomationRecording,
   browserProfileDir: string,
   options: RunOptions = { headless: false },
-  onProgress?: ProgressSink
+  onProgress?: ProgressSink,
+  resolveDynamicValue?: DynamicValueResolver
 ): Promise<void> {
   const preparedProfile = await prepareBrowserProfile(browserProfileDir);
   const launchArgs = [
@@ -544,7 +554,7 @@ export async function runRecording(
             );
           }
 
-          await inputAction(actionPage, action);
+          await inputAction(actionPage, action, resolveDynamicValue);
           break;
         }
 

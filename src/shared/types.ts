@@ -9,6 +9,8 @@ export interface AutomationAction {
   url: string;
   selector?: string;
   value?: string;
+  dynamicValuePrompt?: string;
+  dynamicValueContext?: string;
   isSecret?: boolean;
   key?: string;
   code?: string;

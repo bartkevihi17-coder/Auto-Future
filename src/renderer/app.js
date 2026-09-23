@@ -103,6 +103,9 @@ const inspectorType = document.querySelector("#inspector-type");
 const inspectorDelay = document.querySelector("#inspector-delay");
 const inspectorSelector = document.querySelector("#inspector-selector");
 const inspectorValue = document.querySelector("#inspector-value");
+const inspectorDynamicValue = document.querySelector("#inspector-dynamic-value");
+const inspectorDynamicEnabled = document.querySelector("#inspector-dynamic-enabled");
+const inspectorDynamicPrompt = document.querySelector("#inspector-dynamic-prompt");
 const deleteActionButton = document.querySelector("#delete-action-button");
 const saveEditorButton = document.querySelector("#save-editor-button");
 const editorScheduleCount = document.querySelector("#editor-schedule-count");
@@ -220,6 +223,11 @@ const aiAgentApprove = document.querySelector("#ai-agent-approve");
 const aiAgentReject = document.querySelector("#ai-agent-reject");
 const aiAgentUndo = document.querySelector("#ai-agent-undo");
 const aiAgentManual = document.querySelector("#ai-agent-manual");
+const aiAgentComment = document.querySelector("#ai-agent-comment");
+const aiAgentCommentBar = document.querySelector("#ai-agent-comment-bar");
+const aiAgentCommentInput = document.querySelector("#ai-agent-comment-input");
+const aiAgentCommentCancel = document.querySelector("#ai-agent-comment-cancel");
+const aiAgentCommentSend = document.querySelector("#ai-agent-comment-send");
 const aiAgentManualBar = document.querySelector("#ai-agent-manual-bar");
 const aiAgentManualDone = document.querySelector("#ai-agent-manual-done");
 const aiStartUrl = document.querySelector("#ai-start-url");
@@ -1862,8 +1870,12 @@ async function snapshotAiBrowser() {
     throw new Error("O navegador interno ainda não está pronto.");
   }
 
-  return aiAgentBrowser.executeJavaScript(
+  let snapshot;
+
+  try {
+    snapshot = await aiAgentBrowser.executeJavaScript(
     `(() => {
+      try {
       const clean = (value, limit = 180) =>
         String(value || "")
           .replace(/\\s+/g, " ")
@@ -1895,85 +1907,95 @@ async function snapshotAiBrowser() {
         return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
       };
 
-      const quoteAttr = (value) =>
-        String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const safeUnique = (selector) => {
+        try {
+          return document.querySelectorAll(selector).length === 1;
+        } catch {
+          return false;
+        }
+      };
+
+      const attrSelector = (name, value) =>
+        "[" + name + "=" + JSON.stringify(String(value || "")) + "]";
 
       const selectorFor = (element) => {
-        const testId =
-          element.getAttribute("data-testid") ||
-          element.getAttribute("data-test");
+        try {
+          const testId =
+            element.getAttribute("data-testid") ||
+            element.getAttribute("data-test");
 
-        if (testId) {
-          const attr = element.hasAttribute("data-testid")
-            ? "data-testid"
-            : "data-test";
-          return "[" + attr + '="' + quoteAttr(testId) + '"]';
-        }
-
-        if (element.id) {
-          const byId = "#" + cssEscape(element.id);
-          if (document.querySelectorAll(byId).length === 1) return byId;
-        }
-
-        const name = element.getAttribute("name");
-        if (name) {
-          const byName =
-            element.tagName.toLowerCase() +
-            '[name="' +
-            quoteAttr(name) +
-            '"]';
-          if (document.querySelectorAll(byName).length === 1) return byName;
-        }
-
-        const aria = element.getAttribute("aria-label");
-        if (aria) {
-          const byAria = '[aria-label="' + quoteAttr(aria) + '"]';
-          if (document.querySelectorAll(byAria).length === 1) return byAria;
-        }
-
-        const placeholder = element.getAttribute("placeholder");
-        if (placeholder) {
-          const byPlaceholder =
-            element.tagName.toLowerCase() +
-            '[placeholder="' +
-            quoteAttr(placeholder) +
-            '"]';
-          if (document.querySelectorAll(byPlaceholder).length === 1) {
-            return byPlaceholder;
+          if (testId) {
+            const attr = element.hasAttribute("data-testid")
+              ? "data-testid"
+              : "data-test";
+            const byTest = attrSelector(attr, testId);
+            if (safeUnique(byTest)) return byTest;
           }
-        }
 
-        const parts = [];
-        let current = element;
+          if (element.id) {
+            const byId = "#" + cssEscape(element.id);
+            if (safeUnique(byId)) return byId;
+          }
 
-        while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 6) {
-          let part = current.tagName.toLowerCase();
-          const parent = current.parentElement;
+          const name = element.getAttribute("name");
+          if (name) {
+            const byName =
+              element.tagName.toLowerCase() + attrSelector("name", name);
+            if (safeUnique(byName)) return byName;
+          }
 
-          if (parent) {
-            const siblings = Array.from(parent.children).filter(
-              (child) => child.tagName === current.tagName
-            );
+          const aria = element.getAttribute("aria-label");
+          if (aria) {
+            const byAria = attrSelector("aria-label", aria);
+            if (safeUnique(byAria)) return byAria;
+          }
 
-            if (siblings.length > 1) {
-              part +=
-                ":nth-of-type(" +
-                (siblings.indexOf(current) + 1) +
-                ")";
+          const placeholder = element.getAttribute("placeholder");
+          if (placeholder) {
+            const byPlaceholder =
+              element.tagName.toLowerCase() +
+              attrSelector("placeholder", placeholder);
+            if (safeUnique(byPlaceholder)) return byPlaceholder;
+          }
+
+          const parts = [];
+          let current = element;
+
+          while (
+            current &&
+            current.nodeType === Node.ELEMENT_NODE &&
+            parts.length < 6
+          ) {
+            let part = current.tagName.toLowerCase();
+            const parent = current.parentElement;
+
+            if (parent) {
+              const siblings = Array.from(parent.children).filter(
+                (child) => child.tagName === current.tagName
+              );
+
+              if (siblings.length > 1) {
+                part +=
+                  ":nth-of-type(" +
+                  (siblings.indexOf(current) + 1) +
+                  ")";
+              }
             }
+
+            parts.unshift(part);
+            const candidate = parts.join(" > ");
+
+            if (safeUnique(candidate)) {
+              return candidate;
+            }
+
+            current = parent;
           }
 
-          parts.unshift(part);
-          const candidate = parts.join(" > ");
-
-          if (document.querySelectorAll(candidate).length === 1) {
-            return candidate;
-          }
-
-          current = parent;
+          return parts.join(" > ");
+        } catch {
+          return "";
         }
-
-        return parts.join(" > ");
       };
 
       document.querySelectorAll("[data-af-ai-id]").forEach((el) => {
@@ -2047,24 +2069,133 @@ async function snapshotAiBrowser() {
         });
       }
 
-      return {
-        url: location.href,
-        title: document.title,
-        viewport: {
-          width: innerWidth,
-          height: innerHeight
-        },
-        text: clean(document.body?.innerText, 7000),
-        elements
-      };
+        return {
+          url: location.href,
+          title: document.title,
+          viewport: {
+            width: innerWidth,
+            height: innerHeight
+          },
+          text: clean(document.body?.innerText, 7000),
+          elements
+        };
+      } catch (error) {
+        return {
+          __snapshotError:
+            error && typeof error.message === "string"
+              ? error.message
+              : String(error || "erro desconhecido"),
+          url: location.href,
+          title: document.title,
+          elements: []
+        };
+      }
     })()`
-  );
+    );
+  } catch (primaryError) {
+    snapshot = await aiAgentBrowser.executeJavaScript(
+      `(() => {
+        try {
+          const clean = (value, limit = 180) =>
+            String(value || "").replace(/\\s+/g, " ").trim().slice(0, limit);
+
+          document.querySelectorAll("[data-af-ai-id]").forEach((el) => {
+            el.removeAttribute("data-af-ai-id");
+          });
+
+          const elements = [];
+          const selector = "button,a[href],input,textarea,select,[contenteditable=true],[role=button],[role=link],[role=menuitem],[tabindex]";
+
+          for (const el of document.querySelectorAll(selector)) {
+            if (elements.length >= 120) break;
+
+            const rect = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            const visible =
+              rect.width > 2 &&
+              rect.height > 2 &&
+              rect.bottom > 0 &&
+              rect.right > 0 &&
+              rect.top < innerHeight &&
+              rect.left < innerWidth &&
+              style.display !== "none" &&
+              style.visibility !== "hidden";
+
+            if (!visible) continue;
+
+            const id = "af-" + (elements.length + 1);
+            el.setAttribute("data-af-ai-id", id);
+
+            elements.push({
+              id,
+              tag: el.tagName.toLowerCase(),
+              role: clean(el.getAttribute("role"), 60),
+              text: clean(el.innerText || el.textContent, 180),
+              ariaLabel: clean(el.getAttribute("aria-label"), 180),
+              placeholder: clean(el.getAttribute("placeholder"), 180),
+              title: clean(el.getAttribute("title"), 180),
+              href: el.tagName === "A" ? clean(el.href, 500) : "",
+              selector: "",
+              disabled: Boolean(
+                el.disabled || el.getAttribute("aria-disabled") === "true"
+              ),
+              rect: {
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+              }
+            });
+          }
+
+          return {
+            url: location.href,
+            title: document.title,
+            viewport: { width: innerWidth, height: innerHeight },
+            text: clean(document.body && document.body.innerText, 7000),
+            elements,
+            fallbackSnapshot: true
+          };
+        } catch (error) {
+          return {
+            __snapshotError:
+              error && typeof error.message === "string"
+                ? error.message
+                : String(error || "erro desconhecido"),
+            elements: []
+          };
+        }
+      })()`
+    ).catch(() => null);
+
+    if (!snapshot) {
+      throw new Error(
+        "Não consegui ler a página dentro do navegador da IA. " +
+          (primaryError?.message || String(primaryError))
+      );
+    }
+  }
+
+  if (snapshot?.__snapshotError) {
+    throw new Error("Falha ao ler a página atual: " + snapshot.__snapshotError);
+  }
+
+  return snapshot;
 }
 
 function describeAiProposal(proposal) {
   if (!proposal) return "";
 
   if (proposal.action === "input") {
+    if (proposal.valueMode === "ai" && proposal.valuePrompt) {
+      return (
+        "Digitar agora: " +
+        (proposal.value || "valor gerado") +
+        " · nos próximos loops a IA gera: " +
+        proposal.valuePrompt
+      );
+    }
+
     return proposal.value
       ? "Digitar: " + proposal.value
       : "Preencher o campo selecionado.";
@@ -2300,6 +2431,60 @@ function setAiProposalButtonsVisible(visible) {
   aiAgentApprove.classList.toggle("is-hidden", !visible);
   aiAgentReject.classList.toggle("is-hidden", !visible);
   aiAgentManual.classList.toggle("is-hidden", !visible);
+  aiAgentComment.classList.toggle("is-hidden", !visible);
+}
+
+function closeAiCommentComposer() {
+  aiAgentCommentBar.classList.add("is-hidden");
+  aiAgentCommentInput.value = "";
+  aiAgentCommentSend.disabled = false;
+  aiAgentCommentCancel.disabled = false;
+}
+
+function openAiCommentComposer() {
+  if (!aiAgentAction || !aiAgentProposalState) return;
+
+  aiAgentCommentBar.classList.remove("is-hidden");
+  requestAnimationFrame(() => aiAgentCommentInput.focus());
+}
+
+async function submitAiAgentComment() {
+  const comment = aiAgentCommentInput.value.replace(/\s+/g, " ").trim();
+
+  if (!comment || !aiAgentAction || !aiAgentProposalState) {
+    aiAgentCommentInput.focus();
+    return;
+  }
+
+  const proposal = aiAgentProposalState;
+  aiAgentCommentSend.disabled = true;
+  aiAgentCommentCancel.disabled = true;
+
+  pushAiAgentContextEvent("comment", proposal, {
+    comment,
+    note:
+      "Comentário explícito do usuário. Recalcule a ação atual e use esta instrução também nas próximas etapas enquanto continuar relevante.",
+  });
+
+  if (proposal.status !== "done") {
+    aiAgentRejected.push({
+      ...compactAiProposal(proposal),
+      reason: "comment-recalculate",
+      comment,
+    });
+  }
+
+  aiAgentProposalState = null;
+  aiAgentProposal.classList.add("is-hidden");
+  closeAiCommentComposer();
+  setAiAgentStatus("Aplicando seu comentário...", "working");
+  await clearAiTargetBubble();
+
+  await requestAiAgentProposal(
+    "COMENTÁRIO NOVO DO USUÁRIO: " +
+      comment +
+      ". Recalcule a ação atual e as próximas sem perder o histórico anterior."
+  );
 }
 
 function compactAiProposal(proposal) {
@@ -2314,6 +2499,8 @@ function compactAiProposal(proposal) {
         : null,
     key: proposal.key || null,
     url: proposal.url || null,
+    valueMode: proposal.valueMode || "fixed",
+    valuePrompt: proposal.valuePrompt || null,
     label: proposal.label || null,
   };
 }
@@ -2709,6 +2896,22 @@ function buildAiRecordingSteps() {
         action: proposal.action,
         selector: target?.selector || "",
         value: proposal.value || "",
+        dynamicValuePrompt:
+          proposal.valueMode === "ai"
+            ? proposal.valuePrompt || ""
+            : "",
+        dynamicValueContext:
+          proposal.valueMode === "ai"
+            ? [
+                aiAgentAction?.instruction || "",
+                ...aiAgentContextEvents
+                  .filter((item) => item.type === "comment" && item.comment)
+                  .map((item) => item.comment)
+              ]
+                .filter(Boolean)
+                .join("\n")
+                .slice(0, 5000)
+            : "",
         key: proposal.key || "",
         pageUrl:
           event.pageUrlBefore ||
@@ -3009,6 +3212,7 @@ function enterAiAgentManualMode() {
   syncAiUndoButton();
   aiAgentProposalState = null;
   aiAgentProposal.classList.add("is-hidden");
+  closeAiCommentComposer();
   aiAgentManualBar.classList.remove("is-hidden");
   setAiAgentStatus("Controle manual ativo", "manual");
   void clearAiTargetBubble();
@@ -3064,6 +3268,7 @@ async function startAiAgent(action) {
   aiAgentName.textContent = action.name || "Ação com IA";
   aiAgentObjective.textContent = action.instruction || "";
   aiAgentProposal.classList.add("is-hidden");
+  closeAiCommentComposer();
   aiAgentManualBar.classList.add("is-hidden");
   aiAgentBrowser.classList.add("is-reviewing");
   aiAgentWorkspace.classList.remove("is-hidden");
@@ -3170,6 +3375,7 @@ function forceStopAiAgent() {
   aiAgentContextEvents = [];
 
   aiAgentProposal.classList.add("is-hidden");
+  closeAiCommentComposer();
   aiAgentManualBar.classList.add("is-hidden");
   aiAgentBrowser.classList.remove("is-reviewing");
   aiAgentWorkspace.classList.add("is-hidden");
@@ -3201,6 +3407,7 @@ async function closeAiAgent() {
   aiAgentWorkspace.classList.add("is-hidden");
   aiAgentWorkspace.closest(".ai-shell")?.classList.remove("agent-active");
   aiAgentProposal.classList.add("is-hidden");
+  closeAiCommentComposer();
   aiAgentManualBar.classList.add("is-hidden");
   aiAgentBrowser.classList.remove("is-reviewing");
   aiBrowserUrl.textContent = "about:blank";
@@ -4821,6 +5028,10 @@ function selectAction(actionId) {
     inspectorDelay.value = "";
     inspectorSelector.value = "";
     inspectorValue.value = "";
+    inspectorDynamicEnabled.checked = false;
+    inspectorDynamicPrompt.value = "";
+    inspectorDynamicPrompt.disabled = true;
+    inspectorDynamicValue.classList.add("is-hidden");
 
     inspectorDelay.disabled = true;
     inspectorSelector.disabled = true;
@@ -4849,6 +5060,15 @@ function selectAction(actionId) {
       ? action.key || ""
       : action.value || "";
 
+  const supportsDynamicValue = action.type === "input" && !action.isSecret;
+  inspectorDynamicValue.classList.toggle("is-hidden", !supportsDynamicValue);
+  inspectorDynamicEnabled.checked =
+    supportsDynamicValue && Boolean(action.dynamicValuePrompt);
+  inspectorDynamicPrompt.value =
+    supportsDynamicValue ? action.dynamicValuePrompt || "" : "";
+  inspectorDynamicPrompt.disabled =
+    !supportsDynamicValue || !inspectorDynamicEnabled.checked;
+
   deleteActionButton.disabled = false;
   setEditorVideoPage(action.pageId);
   renderTimeline();
@@ -4870,6 +5090,13 @@ function updateSelectedAction() {
 
   if (action.type === "input" && !action.isSecret) {
     action.value = inspectorValue.value;
+
+    if (inspectorDynamicEnabled.checked) {
+      action.dynamicValuePrompt = inspectorDynamicPrompt.value.trim();
+    } else {
+      delete action.dynamicValuePrompt;
+      delete action.dynamicValueContext;
+    }
   }
 
   if (action.type === "key" && !action.isSecret) {
@@ -5577,6 +5804,24 @@ aiAgentReject.addEventListener("click", async () => {
 
 aiAgentManual.addEventListener("click", enterAiAgentManualMode);
 
+aiAgentComment.addEventListener("click", openAiCommentComposer);
+
+aiAgentCommentCancel.addEventListener("click", closeAiCommentComposer);
+
+aiAgentCommentSend.addEventListener("click", () => {
+  void submitAiAgentComment();
+});
+
+aiAgentCommentInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    void submitAiAgentComment();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeAiCommentComposer();
+  }
+});
+
 aiAgentManualDone.addEventListener("click", () => {
   void leaveAiAgentManualMode();
 });
@@ -5896,8 +6141,35 @@ stopButton.addEventListener("click", async () => {
   }
 });
 
-[inspectorDelay, inspectorSelector, inspectorValue].forEach((input) => {
+[inspectorDelay, inspectorSelector, inspectorValue, inspectorDynamicPrompt].forEach((input) => {
   input.addEventListener("input", updateSelectedAction);
+});
+
+inspectorDynamicEnabled.addEventListener("change", () => {
+  if (!currentRecording || !selectedActionId) return;
+
+  const action = currentRecording.actions.find(
+    (item) => item.id === selectedActionId
+  );
+
+  if (!action || action.type !== "input" || action.isSecret) return;
+
+  inspectorDynamicPrompt.disabled = !inspectorDynamicEnabled.checked;
+
+  if (inspectorDynamicEnabled.checked) {
+    if (!inspectorDynamicPrompt.value.trim()) {
+      inspectorDynamicPrompt.value =
+        "gerar um valor diferente e adequado a cada loop, evitando repetir os valores anteriores";
+    }
+
+    action.dynamicValuePrompt = inspectorDynamicPrompt.value.trim();
+    inspectorDynamicPrompt.focus();
+  } else {
+    delete action.dynamicValuePrompt;
+    delete action.dynamicValueContext;
+  }
+
+  renderTimeline();
 });
 
 deleteActionButton.addEventListener("click", () => {

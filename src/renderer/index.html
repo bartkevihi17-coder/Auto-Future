@@ -389,6 +389,21 @@
                 <input id="inspector-value" disabled />
               </label>
 
+              <section id="inspector-dynamic-value" class="inspector-dynamic-value is-hidden">
+                <label class="inspector-dynamic-toggle">
+                  <input id="inspector-dynamic-enabled" type="checkbox" />
+                  <span>
+                    <strong>Valor dinâmico por IA</strong>
+                    <small>Gera um novo valor quando esta ação for alcançada; o valor fixo acima vira só referência.</small>
+                  </span>
+                </label>
+
+                <label class="field">
+                  <span>Regra para gerar o valor</span>
+                  <textarea id="inspector-dynamic-prompt" rows="3" maxlength="1200" placeholder="Ex.: gerar um nome de jogador de futebol diferente a cada loop, sem repetir" disabled></textarea>
+                </label>
+              </section>
+
               <button id="delete-action-button" class="button compact danger" type="button" disabled>
                 Excluir ação
               </button>
@@ -636,8 +651,17 @@
                 <div class="ai-agent-actions">
                   <button id="ai-agent-undo" class="button" type="button" disabled>↶ Voltar ação</button>
                   <button id="ai-agent-manual" class="button" type="button">Manual</button>
+                  <button id="ai-agent-comment" class="button" type="button">Comentar</button>
                   <button id="ai-agent-reject" class="button" type="button">Recusar</button>
                   <button id="ai-agent-approve" class="button primary" type="button">Aprovar</button>
+                </div>
+              </div>
+
+              <div id="ai-agent-comment-bar" class="ai-agent-comment-bar is-hidden">
+                <textarea id="ai-agent-comment-input" rows="2" maxlength="1200" placeholder="Ex.: neste campo use um nome de jogador diferente em cada loop..."></textarea>
+                <div>
+                  <button id="ai-agent-comment-cancel" class="button" type="button">Cancelar</button>
+                  <button id="ai-agent-comment-send" class="button primary" type="button">Recalcular</button>
                 </div>
               </div>
 

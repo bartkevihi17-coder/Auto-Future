@@ -779,6 +779,65 @@ async function appendRun(run: AutomationRunRecord): Promise<void> {
   mainWindow?.webContents.send("runs:changed");
 }
 
+async function resolveDynamicActionValue(
+  recording: AutomationRecording,
+  action: AutomationAction,
+  loopIndex: number,
+  loopTotal: number,
+  previousValues: string[]
+): Promise<string> {
+  const prompt = String(action.dynamicValuePrompt || "").replace(/\s+/g, " ").trim();
+
+  if (!prompt) {
+    return action.value ?? "";
+  }
+
+  const settings = await getQwenClientSettings();
+  const context = String(action.dynamicValueContext || "").trim();
+  const previous = previousValues.slice(-99);
+
+  const result = await callQwen(
+    settings,
+    [
+      {
+        role: "system",
+        content:
+          "Você gera APENAS o valor que será digitado em um campo de uma automação. " +
+          "Siga a regra dinâmica informada pelo usuário. Quando houver múltiplos loops, varie o valor quando a regra pedir variedade e evite repetir valores anteriores. " +
+          "Não explique nada. Retorne SOMENTE JSON válido no formato {\"value\":\"texto para digitar\"}. " +
+          "O valor deve ser curto o suficiente para um campo comum de navegador, salvo quando a instrução pedir explicitamente algo maior."
+      },
+      {
+        role: "user",
+        content:
+          "AUTOMAÇÃO: " + recording.name +
+          "\nLOOP ATUAL: " + loopIndex + " de " + loopTotal +
+          "\nREGRA DO VALOR: " + prompt +
+          (context ? "\nCONTEXTO DA AUTOMAÇÃO: " + context.slice(0, 4000) : "") +
+          (previous.length
+            ? "\nVALORES JÁ USADOS NESTA AÇÃO: " + JSON.stringify(previous)
+            : "\nVALORES JÁ USADOS NESTA AÇÃO: []")
+      }
+    ],
+    {
+      temperature: 0.65,
+      maxTokens: 140,
+      timeoutMs: 30_000,
+    }
+  );
+
+  const parsed = extractJsonObject(result.content);
+  const value = String(parsed.value ?? "").trim();
+
+  if (!value) {
+    throw new Error(
+      "A IA não conseguiu gerar um valor dinâmico para a ação: " + prompt
+    );
+  }
+
+  return value.slice(0, 1000);
+}
+
 async function executeRecording(
   recording: AutomationRecording,
   visible: boolean,
@@ -801,6 +860,7 @@ async function executeRecording(
 
   try {
     const loopTotal = normalizeLoopCount(recording.loopCount);
+    const dynamicValuesByAction = new Map<string, string[]>();
 
     for (let loopIndex = 1; loopIndex <= loopTotal; loopIndex += 1) {
       await runRecording(
@@ -818,6 +878,19 @@ async function executeRecording(
             loopIndex,
             loopTotal,
           });
+        },
+        async (action) => {
+          const previousValues = dynamicValuesByAction.get(action.id) || [];
+          const value = await resolveDynamicActionValue(
+            recording,
+            action,
+            loopIndex,
+            loopTotal,
+            previousValues
+          );
+
+          dynamicValuesByAction.set(action.id, [...previousValues, value]);
+          return value;
         }
       );
     }
@@ -1050,6 +1123,8 @@ app.whenReady().then(async () => {
           pageUrl?: string;
           x?: number;
           y?: number;
+          dynamicValuePrompt?: string;
+          dynamicValueContext?: string;
         }>;
       }
     ) => {
@@ -1165,6 +1240,14 @@ app.whenReady().then(async () => {
           url: pageUrl,
           selector: selector || undefined,
           value: type === "input" ? String(step.value || "") : undefined,
+          dynamicValuePrompt:
+            type === "input"
+              ? String(step.dynamicValuePrompt || "").replace(/\s+/g, " ").trim().slice(0, 1200) || undefined
+              : undefined,
+          dynamicValueContext:
+            type === "input"
+              ? String(step.dynamicValueContext || "").trim().slice(0, 5000) || undefined
+              : undefined,
           key: type === "key" ? String(step.key || "Enter") : undefined,
           x: Number.isFinite(x) ? x : undefined,
           y: Number.isFinite(y) ? y : undefined,
@@ -1342,6 +1425,9 @@ app.whenReady().then(async () => {
               "Trate eventos analysis-error apenas como falhas internas de análise, sem alterar o progresso do objetivo. " +
               "Trate eventos undo como indicação de que a ação correspondente deixou de contar como concluída. " +
               "Trate eventos manual como mudanças realizadas diretamente pelo usuário e continue do estado resultante. " +
+              "Trate eventos comment como instruções explícitas do usuário para recalcular a ação atual e orientar também as próximas ações; mantenha esses comentários como contexto persistente enquanto forem relevantes. " +
+              "Se um comentário ou o objetivo disser que um campo deve receber valores diferentes entre loops/execuções, como nomes aleatórios, termos variados ou jogadores de futebol diferentes, use uma ação input dinâmica. " +
+              "Para input dinâmico, retorne valueMode=\"ai\", um value concreto para a execução atual e valuePrompt com a regra reutilizável que deverá gerar novos valores futuramente. " +
               "Não reinicie o fluxo e não volte a perguntar/sugerir uma etapa já aprovada, a menos que ela tenha sido desfeita ou que o snapshot atual mostre claramente que voltou a ser necessária. " +
               "O SNAPSHOT ATUAL é a verdade sobre o estado presente da página; o histórico explica como chegou até ele. " +
               "Antes de sugerir ações que alternam estado, como reproduzir/pausar, ativar/desativar ou abrir/fechar, confirme pelo snapshot qual estado já está ativo. " +
@@ -1350,7 +1436,8 @@ app.whenReady().then(async () => {
               "Nunca peça confirmação ao usuário e nunca explique o raciocínio. " +
               "Retorne SOMENTE JSON válido em um destes formatos: " +
               "{\"status\":\"action\",\"action\":\"click\",\"targetId\":\"af-1\",\"label\":\"Clicar em Lixeira\"}, " +
-              "{\"status\":\"action\",\"action\":\"input\",\"targetId\":\"af-2\",\"value\":\"texto\",\"label\":\"Digitar texto\"}, " +
+              "{\"status\":\"action\",\"action\":\"input\",\"targetId\":\"af-2\",\"value\":\"texto\",\"valueMode\":\"fixed\",\"label\":\"Digitar texto\"}, " +
+              "{\"status\":\"action\",\"action\":\"input\",\"targetId\":\"af-2\",\"value\":\"Messi\",\"valueMode\":\"ai\",\"valuePrompt\":\"gerar um nome de jogador de futebol diferente a cada loop, sem repetir\",\"label\":\"Digitar jogador variável\"}, " +
               "{\"status\":\"action\",\"action\":\"key\",\"targetId\":\"af-2\",\"key\":\"Enter\",\"label\":\"Pressionar Enter\"}, " +
               "{\"status\":\"action\",\"action\":\"navigate\",\"url\":\"https://exemplo.com\",\"label\":\"Abrir página\"}, " +
               "{\"status\":\"action\",\"action\":\"wait\",\"label\":\"Aguardar página\"}, " +
@@ -1410,10 +1497,31 @@ app.whenReady().then(async () => {
         action: actionType,
         targetId: String(parsed.targetId || "").trim() || undefined,
         value: String(parsed.value || ""),
+        valueMode: parsed.valueMode === "ai" ? "ai" : "fixed",
+        valuePrompt:
+          parsed.valueMode === "ai"
+            ? String(parsed.valuePrompt || "").replace(/\s+/g, " ").trim().slice(0, 1200) || undefined
+            : undefined,
         key: String(parsed.key || "").trim() || undefined,
         url: normalizeAiActionUrl(parsed.url),
         label: String(parsed.label || "Próxima ação").slice(0, 180),
       };
+
+      if (
+        actionType === "input" &&
+        proposal.valueMode === "ai" &&
+        !proposal.valuePrompt
+      ) {
+        throw new Error("A Qwen marcou o campo como dinâmico, mas não informou a regra reutilizável.");
+      }
+
+      if (
+        actionType === "input" &&
+        proposal.valueMode === "ai" &&
+        !proposal.value.trim()
+      ) {
+        throw new Error("A Qwen marcou o campo como dinâmico, mas não gerou o valor desta execução.");
+      }
 
       if (
         (actionType === "click" ||
