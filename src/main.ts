@@ -40,7 +40,89 @@ import {
 } from "./shared/types";
 
 let mainWindow: BrowserWindow | null = null;
+let chatgptWindow: BrowserWindow | null = null;
 let lastRecording: AutomationRecording | null = null;
+
+const CHATGPT_PROTOCOL = "enfoque-chatgpt";
+const CHATGPT_HOST_FILE = path.join(__dirname, "..", "src", "renderer", "chatgpt-host.html");
+
+function isChatGPTDeepLink(value: unknown): boolean {
+  return typeof value === "string" && value.toLowerCase().startsWith(CHATGPT_PROTOCOL + "://");
+}
+
+function findChatGPTDeepLink(argv: string[] = process.argv): string | null {
+  return argv.find((value) => isChatGPTDeepLink(value)) || null;
+}
+
+function openChatGPTWindow(): void {
+  if (chatgptWindow && !chatgptWindow.isDestroyed()) {
+    chatgptWindow.show();
+    chatgptWindow.focus();
+    return;
+  }
+
+  chatgptWindow = new BrowserWindow({
+    width: 1320,
+    height: 900,
+    minWidth: 940,
+    minHeight: 650,
+    backgroundColor: "#f4f6fb",
+    autoHideMenuBar: true,
+    title: "ChatGPT | Enfoque",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: true,
+      webviewTag: true,
+    },
+  });
+
+  chatgptWindow.on("closed", () => {
+    chatgptWindow = null;
+  });
+
+  void chatgptWindow.loadFile(CHATGPT_HOST_FILE);
+}
+
+function registerChatGPTProtocol(): void {
+  try {
+    if (process.defaultApp && process.argv[1]) {
+      app.setAsDefaultProtocolClient(
+        CHATGPT_PROTOCOL,
+        process.execPath,
+        [path.resolve(process.argv[1])]
+      );
+    } else {
+      app.setAsDefaultProtocolClient(CHATGPT_PROTOCOL);
+    }
+  } catch {
+    // A ausencia do registro nao impede o Auto Future de funcionar normalmente.
+  }
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    if (findChatGPTDeepLink(argv)) {
+      openChatGPTWindow();
+      return;
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
+app.on("open-url", (event, url) => {
+  if (!isChatGPTDeepLink(url)) return;
+  event.preventDefault();
+  if (app.isReady()) openChatGPTWindow();
+});
 let recorder: BrowserRecorder;
 let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let executionQueue: Promise<unknown> = Promise.resolve();
@@ -2039,6 +2121,7 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   app.setAppUserModelId("com.autofuture.desktop");
+  registerChatGPTProtocol();
 
   await fs.mkdir(videosDir(), { recursive: true });
   await fs.mkdir(iconsDir(), { recursive: true });
@@ -3523,7 +3606,11 @@ app.whenReady().then(async () => {
     return readRuns();
   });
 
-  createWindow();
+  if (findChatGPTDeepLink()) {
+    openChatGPTWindow();
+  } else {
+    createWindow();
+  }
   startScheduler();
 
   app.on("activate", () => {

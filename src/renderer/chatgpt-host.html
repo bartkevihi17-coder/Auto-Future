@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatGPT | Enfoque</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    html, body { width:100%; height:100%; margin:0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#eef2f8; color:#0f172a; }
+    body { overflow:hidden; }
+    .shell { width:100%; height:100%; display:flex; flex-direction:column; padding:12px; gap:10px; }
+    .bar { flex:0 0 auto; height:48px; display:flex; align-items:center; gap:10px; padding:0 12px; border-radius:16px; background:rgba(255,255,255,.92); border:1px solid rgba(15,23,42,.08); box-shadow:0 10px 30px rgba(15,23,42,.08); }
+    .brand { display:flex; align-items:center; gap:10px; min-width:0; }
+    .brand-mark { width:28px; height:28px; border-radius:9px; display:grid; place-items:center; color:#fff; background:#111827; font-size:15px; }
+    .brand strong { font-size:14px; }
+    .status { color:#64748b; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .spacer { flex:1; }
+    .bar button { border:1px solid rgba(15,23,42,.09); background:#fff; color:#334155; border-radius:10px; height:32px; padding:0 11px; font-weight:650; cursor:pointer; }
+    .bar button:hover { background:#f8fafc; }
+    .frame { min-height:0; flex:1; border-radius:18px; overflow:hidden; border:1px solid rgba(15,23,42,.08); background:#fff; box-shadow:0 20px 55px rgba(15,23,42,.12); }
+    webview { width:100%; height:100%; display:flex; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="bar">
+      <div class="brand">
+        <span class="brand-mark">✦</span>
+        <div>
+          <strong>ChatGPT · Enfoque</strong>
+          <div class="status" id="status">Carregando sessão salva...</div>
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button id="home" type="button">ChatGPT</button>
+      <button id="reload" type="button">Recarregar</button>
+    </div>
+    <div class="frame">
+      <webview
+        id="chatgpt"
+        src="about:blank"
+        partition="persist:enfoque-chatgpt"
+        allowpopups
+      ></webview>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const view = document.getElementById("chatgpt");
+      const status = document.getElementById("status");
+      const HOME = "https://chatgpt.com/";
+      const LAST_KEY = "enfoque.chatgpt.lastUrl";
+      const PROJECT_KEY = "enfoque.chatgpt.projectUrl";
+
+      function validChatGPTUrl(value) {
+        try {
+          const url = new URL(value);
+          return url.protocol === "https:" && (url.hostname === "chatgpt.com" || url.hostname.endsWith(".chatgpt.com"));
+        } catch {
+          return false;
+        }
+      }
+
+      function isProjectUrl(value) {
+        if (!validChatGPTUrl(value)) return false;
+        try {
+          const url = new URL(value);
+          return /\/g\/g-p-[^/]+/i.test(url.pathname) || /\/project(?:\/|$)/i.test(url.pathname);
+        } catch {
+          return false;
+        }
+      }
+
+      function remember(url) {
+        if (!validChatGPTUrl(url)) return;
+        localStorage.setItem(LAST_KEY, url);
+        if (isProjectUrl(url)) {
+          localStorage.setItem(PROJECT_KEY, url);
+          status.textContent = "Projeto salvo · a próxima abertura volta direto para cá";
+        } else {
+          status.textContent = "Sessão ativa · aguardando você abrir um projeto";
+        }
+      }
+
+      function startUrl() {
+        const project = localStorage.getItem(PROJECT_KEY);
+        if (project && validChatGPTUrl(project)) return project;
+        const last = localStorage.getItem(LAST_KEY);
+        if (last && validChatGPTUrl(last)) return last;
+        return HOME;
+      }
+
+      view.addEventListener("dom-ready", () => {
+        status.textContent = "Sessão pronta";
+      });
+
+      view.addEventListener("did-navigate", (event) => remember(event.url));
+      view.addEventListener("did-navigate-in-page", (event) => remember(event.url));
+      view.addEventListener("did-fail-load", (event) => {
+        if (event.errorCode === -3) return;
+        status.textContent = "Falha ao carregar · use Recarregar";
+      });
+      view.addEventListener("new-window", (event) => {
+        if (validChatGPTUrl(event.url)) {
+          view.loadURL(event.url);
+        }
+      });
+
+      document.getElementById("home").addEventListener("click", () => view.loadURL(HOME));
+      document.getElementById("reload").addEventListener("click", () => view.reload());
+
+      view.src = startUrl();
+    })();
+  </script>
+</body>
+</html>
